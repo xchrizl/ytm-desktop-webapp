@@ -75,6 +75,9 @@ body {
 .dot.offline { background: var(--red); color: var(--red); }
 
 .player-card {
+    /* Horizontal touch moves are claimed by the swipe-to-skip gesture in
+       app.js; vertical stays with the browser for scrolling. */
+    touch-action: pan-y;
     width: 100%;
     max-width: 420px;
     background: var(--card-bg);

@@ -534,6 +534,83 @@
         if (open) requestPlaylists();
     });
 
+    // --- Swipe gestures ------------------------------------------------------
+    // Horizontal swipe on the player card skips tracks: left = next,
+    // right = previous. The album art follows the finger as feedback.
+
+    const playerCard = el("player-card");
+    const artWrap = document.querySelector(".art-wrap");
+    const SWIPE_THRESHOLD_PX = 70; // finger travel required to trigger
+    const SWIPE_LOCK_PX = 12; // travel before we decide horizontal vs vertical
+
+    let swipeStartX = 0;
+    let swipeStartY = 0;
+    let swipeDeltaX = 0;
+    let swipeTracking = false;
+    // null = direction not decided yet; true = horizontal (ours); false =
+    // vertical (leave it to the browser for scrolling).
+    let swipeHorizontal = null;
+
+    function swipeReset(animate) {
+        if (animate && swipeHorizontal) {
+            artWrap.style.transition = "transform 0.2s ease";
+        }
+        artWrap.style.transform = "";
+        swipeTracking = false;
+        swipeHorizontal = null;
+        swipeDeltaX = 0;
+    }
+
+    playerCard.addEventListener("touchstart", (e) => {
+        if (e.touches.length !== 1) {
+            swipeReset(false);
+            return;
+        }
+        // Sliders and buttons own their touches (dragging the seek bar must
+        // not skip the track).
+        if (e.target.closest("button, input")) return;
+        artWrap.style.transition = "";
+        swipeStartX = e.touches[0].clientX;
+        swipeStartY = e.touches[0].clientY;
+        swipeTracking = true;
+        swipeHorizontal = null;
+        swipeDeltaX = 0;
+    }, { passive: true });
+
+    playerCard.addEventListener("touchmove", (e) => {
+        if (!swipeTracking || e.touches.length !== 1) return;
+        const dx = e.touches[0].clientX - swipeStartX;
+        const dy = e.touches[0].clientY - swipeStartY;
+
+        if (swipeHorizontal === null) {
+            if (Math.abs(dx) < SWIPE_LOCK_PX && Math.abs(dy) < SWIPE_LOCK_PX) return;
+            swipeHorizontal = Math.abs(dx) > Math.abs(dy);
+            if (!swipeHorizontal) {
+                swipeTracking = false;
+                return;
+            }
+        }
+
+        // Claim the gesture so the page doesn't scroll or overscroll-bounce
+        // while swiping (needs the listener to be non-passive).
+        if (e.cancelable) e.preventDefault();
+        swipeDeltaX = dx;
+        // Dampened drag so the art hints at the action without flying off.
+        artWrap.style.transform = `translateX(${dx * 0.35}px)`;
+    }, { passive: false });
+
+    playerCard.addEventListener("touchend", () => {
+        if (!swipeTracking) return;
+        const dx = swipeDeltaX;
+        const trigger = swipeHorizontal && Math.abs(dx) >= SWIPE_THRESHOLD_PX && latestState;
+        swipeReset(true);
+        if (trigger) {
+            sendCommand({ command: dx < 0 ? "next" : "previous" });
+        }
+    });
+
+    playerCard.addEventListener("touchcancel", () => swipeReset(true));
+
     // --- Keyboard shortcuts --------------------------------------------------
 
     function seekBy(deltaSeconds) {
