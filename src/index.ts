@@ -3,7 +3,7 @@ import { getValidToken, invalidateToken } from "./auth";
 import { getApiBaseUrl } from "./api";
 import { connectYtmSocket, type YtmSocketHandle } from "./socket";
 import { setPlayerState, setConnected } from "./state";
-import { setCurrentToken, startServer } from "./server";
+import { broadcastError, setCurrentToken, startServer } from "./server";
 
 async function main(): Promise<void> {
     console.log(`[index] ${config.appName} v${config.appVersion} starting (web UI on port ${config.serverPort})`);
@@ -22,12 +22,18 @@ async function main(): Promise<void> {
     // several rejected reconnect attempts in a row) and racing itself.
     let reauthInProgress = false;
 
+    // connect_error fires on every reconnect attempt (1-10s apart), so only
+    // the first error of an outage is pushed to browsers as a toast; reset
+    // once the socket comes back.
+    let connectionErrorNotified = false;
+
     const socketHandle: YtmSocketHandle = await connectYtmSocket(token, {
         onStateUpdate: (state) => {
             setPlayerState(state);
         },
         onConnect: () => {
             setConnected(true);
+            connectionErrorNotified = false;
         },
         onDisconnect: (reason) => {
             setConnected(false);
@@ -37,6 +43,10 @@ async function main(): Promise<void> {
             // Not auth-related (e.g. YTM Desktop closed, network down).
             // socket.io's own reconnection logic will keep retrying.
             console.error("[index] ytm-socket connection error:", err.message);
+            if (!connectionErrorNotified) {
+                connectionErrorNotified = true;
+                broadcastError(`Can't reach YTM Desktop: ${err.message}`);
+            }
         },
         onAuthError: (err) => {
             if (reauthInProgress) return;

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { config } from "../src/config";
-import { setCurrentToken, startServer } from "../src/server";
+import { broadcastError, setCurrentToken, startServer } from "../src/server";
 import { setConnected, setPlayerState } from "../src/state";
 import type { YTMQueue, YTMStateRes } from "../src/types";
 import { mockServer } from "./mock-companion-server";
@@ -53,6 +53,12 @@ describe("static file serving", () => {
         expect(res.status).toBe(404);
     });
 
+    test("serves manifest.json with the manifest content type", async () => {
+        const res = await fetch(`${base}/manifest.json`);
+        expect(res.status).toBe(200);
+        expect(res.headers.get("content-type")).toBe("application/manifest+json");
+    });
+
     test("serves an ETag and answers a matching If-None-Match with a bodyless 304", async () => {
         const first = await fetch(`${base}/app.js`);
         const etag = first.headers.get("etag");
@@ -79,7 +85,7 @@ describe("websocket protocol", () => {
         const first = await nextMessage(ws);
         ws.close();
 
-        expect(first).toEqual({ type: "state", playerState: state, connected: true });
+        expect(first).toEqual({ type: "state", remoteHost: config.remoteHost, playerState: state, connected: true });
     });
 
     // currentToken in server.ts starts null and is checked *before* JSON is even
@@ -141,6 +147,32 @@ describe("websocket protocol", () => {
             ws.close();
 
             expect(mockServer.receivedCommands).toEqual([{ command: "playPause" }]);
+        });
+
+        test("answers a getPlaylists request with the playlists", async () => {
+            const ws = new WebSocket(`ws://localhost:${config.serverPort}/ws`);
+            await waitOpen(ws);
+            await nextMessage(ws); // drain the initial state push
+
+            const reply = nextMessage(ws);
+            ws.send(JSON.stringify({ type: "getPlaylists" }));
+            const msg = await reply;
+            ws.close();
+
+            expect(msg).toEqual({ type: "playlists", playlists: [{ id: "PL1", title: "Test playlist" }] });
+        });
+
+        test("broadcastError pushes an error message to connected clients", async () => {
+            const ws = new WebSocket(`ws://localhost:${config.serverPort}/ws`);
+            await waitOpen(ws);
+            await nextMessage(ws); // drain the initial state push
+
+            const reply = nextMessage(ws);
+            broadcastError("YTM Desktop went away");
+            const msg = await reply;
+            ws.close();
+
+            expect(msg).toEqual({ type: "error", message: "YTM Desktop went away" });
         });
     });
 });

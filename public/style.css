@@ -431,6 +431,32 @@ input[type="range"]:disabled {
     flex-shrink: 0;
 }
 
+.queue-section-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dimmer);
+    padding: 10px 10px 4px;
+}
+
+.playlist-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.playlist-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
 .toast {
     position: fixed;
     left: 50%;

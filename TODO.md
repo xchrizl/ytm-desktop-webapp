@@ -1,0 +1,15 @@
+# TODO
+
+- [x] Add playlists list: fetch via `api.getPlaylists`, expose in state/server (WS payload), render list in app.js/index.html, click to switch via `changeVideo` command — done (on-demand WS request with 5-min server cache; the special "Liked Music"/`LM` entry is filtered out since YTM Desktop accepts but ignores `changeVideo` for it)
+- [x] Show companion server IP in the "Connected" status text (`config.remoteHost` -> included in WS state -> rendered in `connText`)
+- [x] Investigate whether the companion API exposes per-playlist track listings (`GET /playlists` only returns `id`+`title`, no tracks) — outcome: it doesn't; song-level selection is API-blocked. Playlists can only be started from the beginning via `changeVideo({videoId: null, playlistId})`
+- [ ] ~~If feasible, show songs within a selected playlist and allow choosing one to play via `changeVideo({videoId, playlistId})`~~ — not feasible with the current companion API (no track listing endpoint); revisit if the API adds one -> maybe use 3rd party ytm api with cookie
+- [ ] Move auth/pairing into the UI: decouple `startServer()` from `getValidToken()` in `src/index.ts` so the container always starts and serves the UI even with no/invalid token; add a pairing-state channel (WS or endpoint) that exposes "unauthenticated / pairing code X / paired" status; add UI affordance to start pairing, display the code, and show live status while waiting for approval in YTM Desktop; on mid-session token invalidation (`onAuthError`), surface "disconnected, re-auth needed" in the UI with a button to restart pairing instead of only silent auto-retry
+- [x] Add `public/manifest.json` + minimal service worker so the remote can be installed as a PWA on a phone home screen — done (network-only SW; note: installability requires HTTPS, so over plain http on a LAN IP it runs as a normal page)
+- [x] Wire up the Media Session API (`navigator.mediaSession`) in app.js for lock-screen/notification track info and hardware media key controls — done, but best-effort: most browsers only surface these controls for pages actually playing audio
+- [x] Add desktop keyboard shortcuts in app.js (space=play/pause, ←/→=seek ±10s, ↑/↓=volume, m=mute, n/p=next/previous)
+- [ ] Add frontend tests for `public/app.js` (currently zero coverage; only `src/` is tested via `bun test`)
+- [x] Address `shuffleActive` drift in `app.js` — resolved by not pretending to track state: the button now flashes as click feedback instead of holding a persistent toggle, and the API limitation (no shuffle field) is documented in the code
+- [x] Surface non-auth ytm-socket connection errors (`onConnectionError` in index.ts/socket.ts) to the browser UI as a toast instead of only `console.error` server-side — done, throttled to once per outage
+- [x] Render `queue.automixItems` ("Autoplay"/"Up next") as a separate section in the queue panel — done; automix rows are clickable and continue the queue's `playQueueIndex` space
+- [ ] Add a runtime settings UI to change/reconnect to a different companion server host (`REMOTE_IP`/port) without editing `.env` and redeploying — pairs with the auth-in-UI item

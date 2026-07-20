@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import type { Serve } from "bun";
 import { config } from "./config";
 import { subscribe, getSnapshot, type StateSnapshot } from "./state";
-import { sendCommand, ApiError } from "./api";
-import type { YTMCommand } from "./types";
+import { sendCommand, getPlaylists, ApiError } from "./api";
+import type { YTMCommand, YTMPlaylist } from "./types";
 
 const STATIC_DIR = "public";
 
@@ -20,7 +20,8 @@ type ClientSocket = Bun.ServerWebSocket<unknown>;
 const clients = new Set<ClientSocket>();
 
 type OutgoingMessage =
-    | ({ type: "state"; queueOmitted?: true } & StateSnapshot)
+    | ({ type: "state"; remoteHost: string; queueOmitted?: true } & StateSnapshot)
+    | { type: "playlists"; playlists: YTMPlaylist[] }
     | { type: "error"; message: string };
 
 function send(ws: ClientSocket, message: OutgoingMessage): void {
@@ -45,6 +46,7 @@ function broadcastState(snapshot: StateSnapshot): void {
         queueUnchanged && snapshot.playerState
             ? {
                   type: "state",
+                  remoteHost: config.remoteHost,
                   queueOmitted: true,
                   connected: snapshot.connected,
                   playerState: {
@@ -52,9 +54,18 @@ function broadcastState(snapshot: StateSnapshot): void {
                       player: { ...snapshot.playerState.player, queue: null },
                   },
               }
-            : { type: "state", ...snapshot };
+            : { type: "state", remoteHost: config.remoteHost, ...snapshot };
 
     const payload = JSON.stringify(message);
+    for (const ws of clients) {
+        ws.send(payload);
+    }
+}
+
+/** Pushes a toast-able error message to every connected browser (e.g. "YTM Desktop unreachable"). */
+export function broadcastError(message: string): void {
+    if (clients.size === 0) return;
+    const payload = JSON.stringify({ type: "error", message } satisfies OutgoingMessage);
     for (const ws of clients) {
         ws.send(payload);
     }
@@ -63,6 +74,26 @@ function broadcastState(snapshot: StateSnapshot): void {
 /** Loose runtime check: is this a plausible YTMCommand? Full validity (e.g. data ranges) is left to the companion server to reject. */
 function isPlausibleCommand(value: unknown): value is YTMCommand {
     return typeof value === "object" && value !== null && typeof (value as { command?: unknown }).command === "string";
+}
+
+function isPlaylistsRequest(value: unknown): boolean {
+    return typeof value === "object" && value !== null && (value as { type?: unknown }).type === "getPlaylists";
+}
+
+// Playlists change rarely, but the companion endpoint can block for up to
+// 30s and is rate limited -- cache responses instead of hitting it every
+// time a client opens the playlists panel.
+const PLAYLISTS_CACHE_MS = 5 * 60_000;
+let playlistsCache: { data: YTMPlaylist[]; at: number } | null = null;
+
+async function handleGetPlaylists(ws: ClientSocket, token: string): Promise<void> {
+    if (playlistsCache && Date.now() - playlistsCache.at < PLAYLISTS_CACHE_MS) {
+        send(ws, { type: "playlists", playlists: playlistsCache.data });
+        return;
+    }
+    const playlists = await getPlaylists(token);
+    playlistsCache = { data: playlists, at: Date.now() };
+    send(ws, { type: "playlists", playlists });
 }
 
 async function handleIncomingMessage(ws: ClientSocket, raw: string): Promise<void> {
@@ -76,6 +107,17 @@ async function handleIncomingMessage(ws: ClientSocket, raw: string): Promise<voi
         parsed = JSON.parse(raw);
     } catch {
         send(ws, { type: "error", message: "Invalid JSON" });
+        return;
+    }
+
+    if (isPlaylistsRequest(parsed)) {
+        try {
+            await handleGetPlaylists(ws, currentToken);
+        } catch (err) {
+            const message = err instanceof ApiError ? err.message : "Failed to fetch playlists";
+            console.error("[server] playlists fetch failed:", message);
+            send(ws, { type: "error", message });
+        }
         return;
     }
 
@@ -97,6 +139,8 @@ function contentTypeFor(pathname: string): string {
     if (pathname.endsWith(".html")) return "text/html; charset=utf-8";
     if (pathname.endsWith(".js")) return "text/javascript; charset=utf-8";
     if (pathname.endsWith(".css")) return "text/css; charset=utf-8";
+    if (pathname.endsWith("manifest.json")) return "application/manifest+json";
+    if (pathname.endsWith(".json")) return "application/json; charset=utf-8";
     if (pathname.endsWith(".svg")) return "image/svg+xml";
     if (pathname.endsWith(".png")) return "image/png";
     if (pathname.endsWith(".ico")) return "image/x-icon";
@@ -155,7 +199,7 @@ export function startServer() {
         websocket: {
             open(ws) {
                 clients.add(ws);
-                send(ws, { type: "state", ...getSnapshot() });
+                send(ws, { type: "state", remoteHost: config.remoteHost, ...getSnapshot() });
             },
             close(ws) {
                 clients.delete(ws);
