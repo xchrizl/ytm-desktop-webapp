@@ -3,13 +3,18 @@
   "module": "src/index.ts",
   "type": "module",
   "private": true,
+  "license": "MIT",
+  "description": "Web UI + WebSocket bridge for YouTube Music Desktop's companion server API.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xchrizl/ytm-desktop-webapp.git"
+  },
   "scripts": {
-    "test": "bun test"
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
+    "@types/bun": "latest",
     "typescript": "^5"
   },
   "dependencies": {

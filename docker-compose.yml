@@ -1,0 +1,19 @@
+services:
+  ytm-desktop-webapp:
+    # Built and pushed manually — see README for the build/push commands.
+    # TrueNAS's Compose support runs images, it doesn't build Dockerfiles.
+    image: ghcr.io/xchrizl/ytm-desktop-webapp:latest
+    ports:
+      - "${SERVER_PORT:-8080}:${SERVER_PORT:-8080}"
+    env_file:
+      - .env
+    environment:
+      # Persist the pairing token on a named volume so re-pairing isn't
+      # required every time the container is recreated.
+      TOKEN_FILE_PATH: /data/token.txt
+    volumes:
+      - token-data:/data
+    restart: unless-stopped
+
+volumes:
+  token-data:
