@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { config } from "../src/config";
 import { setCurrentToken, startServer } from "../src/server";
 import { setConnected, setPlayerState } from "../src/state";
-import type { YTMStateRes } from "../src/types";
+import type { YTMQueue, YTMStateRes } from "../src/types";
 import { mockServer } from "./mock-companion-server";
 
 let server: ReturnType<typeof startServer>;
@@ -51,6 +51,17 @@ describe("static file serving", () => {
     test("404s for a file that doesn't exist", async () => {
         const res = await fetch(`${base}/does-not-exist.txt`);
         expect(res.status).toBe(404);
+    });
+
+    test("serves an ETag and answers a matching If-None-Match with a bodyless 304", async () => {
+        const first = await fetch(`${base}/app.js`);
+        const etag = first.headers.get("etag");
+        expect(etag).toBeTruthy();
+        expect(first.headers.get("cache-control")).toBe("no-cache");
+
+        const second = await fetch(`${base}/app.js`, { headers: { "If-None-Match": etag! } });
+        expect(second.status).toBe(304);
+        expect(await second.text()).toBe("");
     });
 });
 
@@ -131,5 +142,78 @@ describe("websocket protocol", () => {
 
             expect(mockServer.receivedCommands).toEqual([{ command: "playPause" }]);
         });
+    });
+});
+
+describe("queue broadcast diffing", () => {
+    const queue: YTMQueue = {
+        autoplay: false,
+        items: [
+            {
+                thumbnails: [{ url: "http://example.test/t.jpg", width: 60, height: 60 }],
+                title: "Song A",
+                author: "Artist",
+                duration: "3:21",
+                selected: true,
+                videoId: "vid-a",
+                counterparts: null,
+            },
+        ],
+        automixItems: [],
+        isGenerating: false,
+        isInfinite: false,
+        repeatMode: 0,
+        selectedItemIndex: 0,
+    };
+
+    function stateWith(progress: number, q: YTMQueue | null): YTMStateRes {
+        return {
+            player: { trackState: 1, videoProgress: progress, volume: 80, adPlaying: false, queue: q },
+            video: null,
+            playlistId: "PL_QUEUE_TEST",
+        };
+    }
+
+    test("sends the queue when it changes, omits it when only progress moves", async () => {
+        const ws = new WebSocket(`ws://localhost:${config.serverPort}/ws`);
+        await waitOpen(ws);
+        await nextMessage(ws); // drain snapshot-on-connect
+
+        // Queue is new -> full broadcast.
+        let broadcast = nextMessage(ws);
+        setPlayerState(stateWith(10, queue));
+        let msg = await broadcast;
+        expect(msg.queueOmitted).toBeUndefined();
+        expect(msg.playerState.player.queue).toEqual(queue);
+
+        // Same queue, progress moved -> queue omitted and flagged.
+        broadcast = nextMessage(ws);
+        setPlayerState(stateWith(11, queue));
+        msg = await broadcast;
+        expect(msg.queueOmitted).toBe(true);
+        expect(msg.playerState.player.queue).toBeNull();
+        expect(msg.playerState.player.videoProgress).toBe(11);
+
+        // Queue changed -> full broadcast again.
+        const movedQueue = { ...queue, selectedItemIndex: 1 };
+        broadcast = nextMessage(ws);
+        setPlayerState(stateWith(12, movedQueue));
+        msg = await broadcast;
+        ws.close();
+        expect(msg.queueOmitted).toBeUndefined();
+        expect(msg.playerState.player.queue).toEqual(movedQueue);
+    });
+
+    test("a client connecting mid-stream still gets the full queue in its snapshot", async () => {
+        // Make the current queue the "already broadcast" one, so a regular
+        // broadcast right now would omit it -- the on-connect snapshot must not.
+        setPlayerState(stateWith(20, queue));
+
+        const ws = new WebSocket(`ws://localhost:${config.serverPort}/ws`);
+        const first = await nextMessage(ws);
+        ws.close();
+
+        expect(first.queueOmitted).toBeUndefined();
+        expect(first.playerState.player.queue).toEqual(queue);
     });
 });

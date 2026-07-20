@@ -1,6 +1,6 @@
 import { unlink } from "node:fs/promises";
 import { config } from "./config";
-import { ApiError, getState, requestCode, requestToken } from "./api";
+import { requestCode, requestToken } from "./api";
 
 /**
  * Reads the persisted token from disk, if present.
@@ -32,23 +32,6 @@ export async function invalidateToken(): Promise<void> {
         if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
             throw err;
         }
-    }
-}
-
-/**
- * Checks whether a token is currently accepted by the companion server.
- * Throws on anything other than an auth failure (network errors, 5xx,
- * rate limits, etc.) so those aren't mistaken for "token is invalid".
- */
-async function isTokenValid(token: string): Promise<boolean> {
-    try {
-        await getState(token);
-        return true;
-    } catch (err) {
-        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-            return false;
-        }
-        throw err;
     }
 }
 
@@ -93,27 +76,13 @@ async function pairNewToken(): Promise<string> {
 }
 
 /**
- * Returns a token guaranteed to be valid at the time of the call:
- * reuses the persisted token if it still works, otherwise runs the
- * pairing flow and persists the new token.
+ * Returns the token to use: the persisted one if present, otherwise runs
+ * the pairing flow and persists the result. The persisted token is trusted
+ * without a validation round trip -- if it turns out to be stale, the
+ * socket's auth-error path (see index.ts) calls invalidateToken and then
+ * this again, which then re-pairs.
  */
 export async function getValidToken(): Promise<string> {
     const existing = await readTokenFromDisk();
-
-    if (existing) {
-        try {
-            if (await isTokenValid(existing)) {
-                return existing;
-            }
-            console.log("Stored token was rejected by the companion server - re-pairing.");
-        } catch (err) {
-            // Couldn't tell whether the token is valid (e.g. a transient network
-            // error) -- assume it's still good rather than forcing a re-pair and
-            // crashing startup over what might just be a momentary blip.
-            console.warn("Could not verify stored token, assuming it's still valid:", err);
-            return existing;
-        }
-    }
-
-    return pairNewToken();
+    return existing ?? pairNewToken();
 }

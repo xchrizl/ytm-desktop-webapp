@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import type { Serve } from "bun";
 import { config } from "./config";
 import { subscribe, getSnapshot, type StateSnapshot } from "./state";
 import { sendCommand, ApiError } from "./api";
@@ -18,15 +20,41 @@ type ClientSocket = Bun.ServerWebSocket<unknown>;
 const clients = new Set<ClientSocket>();
 
 type OutgoingMessage =
-    | ({ type: "state" } & StateSnapshot)
+    | ({ type: "state"; queueOmitted?: true } & StateSnapshot)
     | { type: "error"; message: string };
 
 function send(ws: ClientSocket, message: OutgoingMessage): void {
     ws.send(JSON.stringify(message));
 }
 
+// Serialized queue from the last broadcast. The queue is by far the largest
+// part of a state snapshot and usually unchanged between updates (which
+// arrive on every progress tick) -- when it hasn't changed, it's omitted
+// from the broadcast and clients reuse the queue they already have,
+// signalled by `queueOmitted`. New connections always get a full snapshot.
+let lastQueueJson: string | null = null;
+
 function broadcastState(snapshot: StateSnapshot): void {
-    const payload = JSON.stringify({ type: "state", ...snapshot } satisfies OutgoingMessage);
+    const queueJson = JSON.stringify(snapshot.playerState?.player.queue ?? null);
+    const queueUnchanged = queueJson === lastQueueJson;
+    lastQueueJson = queueJson;
+
+    if (clients.size === 0) return;
+
+    const message: OutgoingMessage =
+        queueUnchanged && snapshot.playerState
+            ? {
+                  type: "state",
+                  queueOmitted: true,
+                  connected: snapshot.connected,
+                  playerState: {
+                      ...snapshot.playerState,
+                      player: { ...snapshot.playerState.player, queue: null },
+                  },
+              }
+            : { type: "state", ...snapshot };
+
+    const payload = JSON.stringify(message);
     for (const ws of clients) {
         ws.send(payload);
     }
@@ -69,20 +97,39 @@ function contentTypeFor(pathname: string): string {
     if (pathname.endsWith(".html")) return "text/html; charset=utf-8";
     if (pathname.endsWith(".js")) return "text/javascript; charset=utf-8";
     if (pathname.endsWith(".css")) return "text/css; charset=utf-8";
+    if (pathname.endsWith(".svg")) return "image/svg+xml";
+    if (pathname.endsWith(".png")) return "image/png";
+    if (pathname.endsWith(".ico")) return "image/x-icon";
     return "application/octet-stream";
 }
 
-async function serveStatic(pathname: string): Promise<Response> {
-    const requestedPath = pathname === "/" ? "/index.html" : pathname;
-    // Strip any ".." segments to prevent escaping STATIC_DIR.
-    const safePath = requestedPath.split("/").filter((segment) => segment !== "..").join("/");
+/**
+ * Preloads every file in STATIC_DIR as a buffered Response for Bun.serve's
+ * static `routes`. Buffered routes are served entirely from native code with
+ * an automatic ETag and If-None-Match/304 handling -- no per-request disk
+ * I/O and no JS on the hot path. `Cache-Control: no-cache` makes browsers
+ * revalidate (a bodyless 304) instead of heuristically caching stale assets.
+ * Routes are frozen when the server starts, so editing a static file
+ * requires a restart.
+ */
+function staticResponse(name: string, body: Uint8Array): Serve.BaseRouteValue {
+    // Cast: with @types/node installed, `new Response()` is typed as undici's
+    // Response, which bun-types' route value type doesn't accept even though
+    // they're the same class at runtime.
+    return new Response(body, {
+        headers: { "Content-Type": contentTypeFor(name), "Cache-Control": "no-cache" },
+    }) as unknown as Serve.BaseRouteValue;
+}
 
-    const file = Bun.file(`${STATIC_DIR}${safePath}`);
-    if (!(await file.exists())) {
-        return new Response("Not found", { status: 404 });
+function buildStaticRoutes(): Record<string, Serve.BaseRouteValue> {
+    const routes: Record<string, Serve.BaseRouteValue> = {};
+    for (const name of new Bun.Glob("*").scanSync(STATIC_DIR)) {
+        const body = readFileSync(`${STATIC_DIR}/${name}`);
+        routes[`/${name}`] = staticResponse(name, body);
+        // index.html doubles as the root route.
+        if (name === "index.html") routes["/"] = staticResponse(name, body);
     }
-
-    return new Response(file, { headers: { "Content-Type": contentTypeFor(safePath) } });
+    return routes;
 }
 
 /** Returns the underlying Bun server handle so callers (mainly tests) can shut it down cleanly. */
@@ -91,6 +138,7 @@ export function startServer() {
 
     const server = Bun.serve({
         port: config.serverPort,
+        routes: buildStaticRoutes(),
         fetch(req, server) {
             const url = new URL(req.url);
 
@@ -101,7 +149,8 @@ export function startServer() {
                 return new Response("WebSocket upgrade failed", { status: 500 });
             }
 
-            return serveStatic(url.pathname);
+            // Anything not matched by the static routes above.
+            return new Response("Not found", { status: 404 });
         },
         websocket: {
             open(ws) {

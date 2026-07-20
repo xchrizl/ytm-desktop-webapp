@@ -44,6 +44,7 @@
 
     let latestState = null; // last YTMStateRes received, or null
     let latestConnected = false;
+    let cachedQueue = null; // last full queue received; reused when the server omits an unchanged one
     let seekDragging = false;
     let volumeDragging = false;
     let mutedLocally = false;
@@ -81,9 +82,23 @@
         }, 3500);
     }
 
-    function largestThumbnail(thumbnails) {
+    // Rendered sizes (in CSS px, scaled for hi-DPI screens) that thumbnails
+    // are picked against -- requesting the largest available thumbnail for a
+    // 36px queue row wastes bandwidth for no visible gain.
+    const DPR = window.devicePixelRatio || 1;
+    const ART_MIN_PX = 240 * DPR;
+    const QUEUE_THUMB_MIN_PX = 36 * DPR;
+
+    /** Smallest thumbnail still sharp at minWidth; falls back to the largest available if none is big enough. */
+    function thumbnailFor(thumbnails, minWidth) {
         if (!thumbnails || thumbnails.length === 0) return null;
-        return thumbnails.reduce((best, t) => (t.width > best.width ? t : best), thumbnails[0]);
+        let best = null;
+        let largest = thumbnails[0];
+        for (const t of thumbnails) {
+            if (t.width > largest.width) largest = t;
+            if (t.width >= minWidth && (!best || t.width < best.width)) best = t;
+        }
+        return best || largest;
     }
 
     // --- WebSocket connection to our own Bun server (see src/server.ts) --------
@@ -141,7 +156,16 @@
 
             if (msg.type === "state") {
                 latestConnected = !!msg.connected;
-                latestState = msg.playerState || null;
+                const state = msg.playerState || null;
+                // The server omits the queue when it hasn't changed since the
+                // last broadcast (it's the bulk of every payload) -- splice
+                // the one we already have back in.
+                if (state && msg.queueOmitted) {
+                    state.player.queue = cachedQueue;
+                } else {
+                    cachedQueue = state ? state.player.queue : null;
+                }
+                latestState = state;
                 updateStatusBar();
                 render(latestState);
             } else if (msg.type === "error") {
@@ -166,6 +190,27 @@
         renderQueue(state ? state.player.queue : null);
     }
 
+    // URL currently shown in the art <img> + backdrop, so state pushes that
+    // don't change the track don't re-set src/background every tick (which
+    // can retrigger loads and restarts the backdrop transition).
+    let currentArtUrl = null;
+
+    function setArt(url) {
+        if (url === currentArtUrl) return;
+        currentArtUrl = url;
+        if (url) {
+            art.src = url;
+            art.style.display = "block";
+            artPlaceholder.style.display = "none";
+            backdrop.style.backgroundImage = `url("${url}")`;
+        } else {
+            art.removeAttribute("src");
+            art.style.display = "none";
+            artPlaceholder.style.display = "flex";
+            backdrop.style.backgroundImage = "";
+        }
+    }
+
     function renderTrack(state) {
         const video = state ? state.video : null;
 
@@ -173,10 +218,7 @@
             titleEl.textContent = "Nothing playing";
             authorEl.textContent = "—";
             albumEl.textContent = "";
-            art.removeAttribute("src");
-            art.style.display = "none";
-            artPlaceholder.style.display = "flex";
-            backdrop.style.backgroundImage = "";
+            setArt(null);
             document.title = "YTM Remote";
             return;
         }
@@ -186,18 +228,8 @@
         albumEl.textContent = video.album || "";
         document.title = `${video.title} — YTM Remote`;
 
-        const thumb = largestThumbnail(video.thumbnails);
-        if (thumb) {
-            art.src = thumb.url;
-            art.style.display = "block";
-            artPlaceholder.style.display = "none";
-            backdrop.style.backgroundImage = `url("${thumb.url}")`;
-        } else {
-            art.removeAttribute("src");
-            art.style.display = "none";
-            artPlaceholder.style.display = "flex";
-            backdrop.style.backgroundImage = "";
-        }
+        const thumb = thumbnailFor(video.thumbnails, ART_MIN_PX);
+        setArt(thumb ? thumb.url : null);
 
         btnLike.classList.toggle("active", video.likeStatus === LIKE);
         btnDislike.classList.toggle("active", video.likeStatus === LIKE_DISLIKE);
@@ -259,14 +291,36 @@
         iconMute.classList.toggle("icon-hidden", !isMuted);
     }
 
+    // Identifies the track list rendered into #queue-list. State pushes
+    // arrive on every progress tick; rebuilding dozens of <li>s (and their
+    // <img>s) each time is by far the most expensive thing on the page, and
+    // almost always the list hasn't changed -- only the selection has.
+    let renderedQueueSignature = null;
+
+    function queueSignature(items) {
+        return items.map((item) => `${item.videoId} ${item.title}`).join("\n");
+    }
+
     function renderQueue(queue) {
         if (!queue || !queue.items || queue.items.length === 0) {
             queuePanel.hidden = true;
             queueList.textContent = "";
+            renderedQueueSignature = null;
             return;
         }
 
         queuePanel.hidden = false;
+
+        const signature = queueSignature(queue.items);
+        if (signature === renderedQueueSignature) {
+            // Same tracks -- just sync the selection highlight.
+            const rows = queueList.children;
+            for (let i = 0; i < rows.length; i++) {
+                rows[i].classList.toggle("selected", queue.items[i].selected);
+            }
+            return;
+        }
+        renderedQueueSignature = signature;
         queueList.textContent = "";
 
         queue.items.forEach((item, index) => {
@@ -274,7 +328,7 @@
             li.className = "queue-item";
             if (item.selected) li.classList.add("selected");
 
-            const thumb = largestThumbnail(item.thumbnails);
+            const thumb = thumbnailFor(item.thumbnails, QUEUE_THUMB_MIN_PX);
             const img = document.createElement("img");
             img.alt = "";
             if (thumb) img.src = thumb.url;
@@ -387,6 +441,8 @@
         }, 100);
     });
     volumeSlider.addEventListener("change", () => {
+        // Cancel the debounced send from "input" so release doesn't fire setVolume twice.
+        clearTimeout(volumeSendTimer);
         volumeDragging = false;
         sendCommand({ command: "setVolume", data: Number(volumeSlider.value) });
     });

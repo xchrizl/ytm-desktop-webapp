@@ -23,32 +23,26 @@ describe("auth", () => {
         expect(await readTokenFile()).toBe("valid-token");
     });
 
-    test("getValidToken reuses a persisted token that's still accepted", async () => {
-        await Bun.write(config.tokenFilePath, "valid-token");
+    test("getValidToken reuses a persisted token without validating it", async () => {
+        // A persisted token is trusted as-is (no round trip to the companion
+        // server) -- even one the server would reject. Stale tokens are
+        // handled reactively by the socket's auth-error path in index.ts,
+        // which invalidates and re-pairs.
+        await Bun.write(config.tokenFilePath, "some-possibly-stale-token");
 
         const token = await getValidToken();
 
-        expect(token).toBe("valid-token");
+        expect(token).toBe("some-possibly-stale-token");
     });
 
-    test("getValidToken re-pairs when the persisted token is rejected", async () => {
+    test("getValidToken re-pairs after invalidateToken", async () => {
         await Bun.write(config.tokenFilePath, "some-old-revoked-token");
+        await invalidateToken();
 
         const token = await getValidToken();
 
         expect(token).toBe("valid-token");
         expect(await readTokenFile()).toBe("valid-token");
-    });
-
-    test("getValidToken trusts the persisted token if validation fails for a non-auth reason", async () => {
-        await Bun.write(config.tokenFilePath, "valid-token");
-        mockServer.forceErrorNextRequestTo = "/api/v1/state"; // 500, not 401/403
-
-        const token = await getValidToken();
-
-        // Optimistically trusted rather than treated as invalid -- a 500 isn't
-        // proof the token is bad, just that the check itself failed.
-        expect(token).toBe("valid-token");
     });
 
     test("invalidateToken removes the persisted token", async () => {
