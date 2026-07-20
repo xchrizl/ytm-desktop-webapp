@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>YTM Remote</title>
+    <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+    <div id="backdrop"></div>
+
+    <div id="app">
+        <header class="status-bar">
+            <span id="conn-dot" class="dot"></span>
+            <span id="conn-text">Connecting&hellip;</span>
+        </header>
+
+        <main class="player-card" id="player-card">
+            <div class="art-wrap">
+                <img id="art" alt="" />
+                <div id="art-placeholder" class="art-placeholder">
+                    <svg viewBox="0 0 24 24"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3z"/></svg>
+                </div>
+                <div id="ad-badge" class="ad-badge" hidden>Advertisement</div>
+            </div>
+
+            <div class="meta">
+                <h1 id="title">Nothing playing</h1>
+                <p id="author">&mdash;</p>
+                <p id="album"></p>
+            </div>
+
+            <div class="progress-row">
+                <span id="time-current" class="time">0:00</span>
+                <input type="range" id="seek" class="seek" min="0" max="0" value="0" step="1" disabled />
+                <span id="time-total" class="time">0:00</span>
+            </div>
+
+            <div class="controls-row">
+                <button id="btn-shuffle" class="icon-btn" title="Shuffle" aria-label="Shuffle">
+                    <svg viewBox="0 0 24 24"><path d="M14.83 13.41 13.42 14.82 16.55 17.95 15 19.5 19.5 21 21 16.5 19.41 18.09 14.83 13.41M14.5 6.5 16.04 8.04 4 20 5.41 21.41 17.46 9.37 19 10.91V6.5H14.5M10.59 9.17 5.41 4 4 5.41 9.17 10.58 10.59 9.17M21 3l-1.5 4.5L21 12l-4.5-1.5L12 12l1.5-4.5L12 3l4.5 1.5z"/></svg>
+                </button>
+                <button id="btn-prev" class="icon-btn" title="Previous" aria-label="Previous track">
+                    <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+                </button>
+                <button id="btn-playpause" class="icon-btn primary" title="Play / pause" aria-label="Play or pause">
+                    <svg id="icon-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    <svg id="icon-pause" class="icon-hidden" viewBox="0 0 24 24"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
+                </button>
+                <button id="btn-next" class="icon-btn" title="Next" aria-label="Next track">
+                    <svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg>
+                </button>
+                <button id="btn-repeat" class="icon-btn" title="Repeat" aria-label="Repeat mode">
+                    <svg id="icon-repeat" viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2z"/></svg>
+                    <svg id="icon-repeat-one" class="icon-hidden" viewBox="0 0 24 24"><path d="M13 15V9h-1l-2 1v1h1.5v4zM7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2z"/></svg>
+                </button>
+            </div>
+
+            <div class="secondary-row">
+                <div class="rating-group">
+                    <button id="btn-dislike" class="icon-btn small" title="Dislike" aria-label="Dislike">
+                        <svg viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>
+                    </button>
+                    <button id="btn-like" class="icon-btn small" title="Like" aria-label="Like">
+                        <svg viewBox="0 0 24 24"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>
+                    </button>
+                </div>
+
+                <div class="volume-wrap">
+                    <button id="btn-mute" class="icon-btn small" title="Mute / unmute" aria-label="Mute or unmute">
+                        <svg id="icon-vol" viewBox="0 0 24 24"><path d="M3 10v4h4l5 5V5L7 10zm13.5 2A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+                        <svg id="icon-mute" class="icon-hidden" viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z"/></svg>
+                    </button>
+                    <input type="range" id="volume" class="volume-slider" min="0" max="100" value="100" />
+                </div>
+            </div>
+        </main>
+
+        <section class="queue-panel" id="queue-panel" hidden>
+            <button id="queue-toggle" class="queue-toggle">
+                <span>Queue</span>
+                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+            </button>
+            <ul id="queue-list" class="queue-list"></ul>
+        </section>
+    </div>
+
+    <div id="toast" class="toast" hidden></div>
+
+    <script src="/app.js"></script>
+</body>
+</html>
