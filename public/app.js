@@ -37,6 +37,8 @@
     const playlistsToggle = el("playlists-toggle");
     const playlistsList = el("playlists-list");
     const toast = el("toast");
+    const silence = el("silence");
+    const debugPanel = el("debug-panel");
 
     // Repeat mode as reported by the companion server: -1 Unknown, 0 None, 1 All, 2 One.
     const REPEAT_NONE = 0, REPEAT_ALL = 1, REPEAT_ONE = 2;
@@ -677,9 +679,34 @@
     });
 
     // --- Media Session -------------------------------------------------------
-    // Lock-screen/media-key integration where the browser offers it. Note:
-    // most browsers only surface these controls for pages actually playing
-    // audio, so on many platforms this is best-effort only.
+    // Lock-screen/notification and media-key integration. This page never
+    // plays real audio itself (playback happens on the desktop app) -- but
+    // Android Chrome only requests full audio focus (and shows the media
+    // notification) for a page playing media over 5 seconds long, to avoid
+    // triggering it for incidental UI sounds -- see
+    // https://developer.chrome.com/blog/media-notifications. `silence` is a
+    // 10s near-silent (not zero-amplitude) WAV looped for as long as a track
+    // is loaded, purely to keep the browser's media notification alive;
+    // ms.playbackState still reflects the real (paused/playing) state shown
+    // in the notification.
+    let silenceUnlocked = false;
+    let lastSilenceError = null;
+
+    function unlockSilentAudio() {
+        if (silenceUnlocked) return;
+        silence
+            .play()
+            .then(() => {
+                silenceUnlocked = true;
+                lastSilenceError = null;
+                updateMediaSession(latestState);
+            })
+            .catch((err) => {
+                // Still locked (no user gesture yet, or autoplay blocked) -- try again next gesture.
+                lastSilenceError = err && err.name ? err.name : String(err);
+            });
+    }
+    document.addEventListener("pointerdown", unlockSilentAudio);
 
     function updateMediaSession(state) {
         if (!("mediaSession" in navigator)) return;
@@ -688,6 +715,7 @@
         if (!video) {
             ms.metadata = null;
             ms.playbackState = "none";
+            silence.pause();
             return;
         }
         ms.metadata = new MediaMetadata({
@@ -696,7 +724,8 @@
             album: video.album || "",
             artwork: (video.thumbnails || []).map((t) => ({ src: t.url, sizes: `${t.width}x${t.height}` })),
         });
-        ms.playbackState = state.player.trackState === TRACK_PLAYING ? "playing" : "paused";
+        const playing = state.player.trackState === TRACK_PLAYING;
+        ms.playbackState = playing ? "playing" : "paused";
         if (Number.isFinite(video.durationSeconds) && video.durationSeconds > 0) {
             try {
                 ms.setPositionState({
@@ -707,6 +736,16 @@
             } catch {
                 // Invalid position states (e.g. position > duration mid-track-change) aren't worth breaking render over.
             }
+        }
+        // Android derives the notification's own play/pause icon from whether
+        // `silence` itself is actually playing, not just ms.playbackState --
+        // so it has to track the real paused state, not just "is a track loaded".
+        if (playing && silence.paused) {
+            silence.play().catch((err) => {
+                lastSilenceError = err && err.name ? err.name : String(err);
+            });
+        } else if (!playing && !silence.paused) {
+            silence.pause();
         }
     }
 
@@ -725,6 +764,28 @@
                 // Action not supported by this browser -- fine.
             }
         }
+    }
+
+    // --- Debug panel -----------------------------------------------------------
+    // On-screen readout of Media Session / silent-audio state, for diagnosing
+    // notification-controls issues on a phone without hooking up remote
+    // devtools. Enable with ?debug=1 in the URL.
+
+    if (new URLSearchParams(location.search).get("debug") === "1") {
+        debugPanel.hidden = false;
+        setInterval(() => {
+            const ms = ("mediaSession" in navigator) ? navigator.mediaSession : null;
+            debugPanel.textContent = [
+                `connected: ${latestConnected}`,
+                `video loaded: ${!!(latestState && latestState.video)}`,
+                `silence: paused=${silence.paused} time=${silence.currentTime.toFixed(2)} vol=${silence.volume} muted=${silence.muted} readyState=${silence.readyState}`,
+                `silenceUnlocked: ${silenceUnlocked}`,
+                `lastSilenceError: ${lastSilenceError}`,
+                `mediaSession.playbackState: ${ms ? ms.playbackState : "n/a"}`,
+                `mediaSession.metadata.title: ${ms && ms.metadata ? ms.metadata.title : "n/a"}`,
+                `isSecureContext: ${window.isSecureContext}`,
+            ].join("\n");
+        }, 500);
     }
 
     // --- Init ------------------------------------------------------------------

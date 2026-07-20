@@ -475,3 +475,21 @@ input[type="range"]:disabled {
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     z-index: 10;
 }
+
+/* Debug readout: enable by opening the app with ?debug=1 in the URL. */
+#debug-panel {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    z-index: 999;
+    background: rgba(0, 0, 0, 0.85);
+    color: #7fffb0;
+    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    padding: 8px 10px;
+    border-radius: 8px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}

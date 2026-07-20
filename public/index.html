@@ -98,6 +98,15 @@
 
     <div id="toast" class="toast" hidden></div>
 
+    <pre id="debug-panel" hidden></pre>
+
+    <!-- Near-silent (not digitally silent), 10s+ looping audio track.
+         Android/Chrome only requests full audio focus (and shows the Media
+         Session lock-screen/notification controls) for media over 5 seconds
+         long -- setting navigator.mediaSession metadata alone isn't enough,
+         see https://developer.chrome.com/blog/media-notifications. -->
+    <audio id="silence" src="/silence.wav" loop playsinline preload="auto"></audio>
+
     <script src="/app.js"></script>
 </body>
 </html>
