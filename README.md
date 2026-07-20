@@ -72,3 +72,7 @@ on how your Traefik instance discovers routes.
 
 Before using it, edit the `REMOTE_IP` value to match the machine running YTM
 Desktop.
+
+```
+docker rm -f ytm-webapp-local; docker run -d --name ytm-webapp-local --restart unless-stopped -p 8080:8080 --env-file .env -e TOKEN_FILE_PATH=/data/token.txt -v ytm-webapp-local-data:/data ytm-desktop-webapp:local; Start-Sleep -Seconds 4; docker logs --tail 3 ytm-webapp-local
+```

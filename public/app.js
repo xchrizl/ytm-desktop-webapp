@@ -515,6 +515,18 @@
             return;
         }
         playlistsList.textContent = "";
+        
+        // discover mix
+        // RDTMAK5uy_n_5IN6hzAOwdCnM8D8rzrs3vDl12UcZpA
+        const li_discover = document.createElement("li");
+        li_discover.className = "playlist-item";
+        li_discover.textContent = "Discover Mix";
+        li_discover.addEventListener("click", () => {
+            sendCommand({ command: "changeVideo", data: { videoId: null, playlistId: "RDTMAK5uy_n_5IN6hzAOwdCnM8D8rzrs3vDl12UcZpA" } });
+            showToast(`Playing "Discover Mix"`);
+        });
+        playlistsList.appendChild(li_discover);
+
         for (const pl of usable) {
             const li = document.createElement("li");
             li.className = "playlist-item";
