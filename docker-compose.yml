@@ -3,6 +3,7 @@ services:
     # Built and pushed manually — see README for the build/push commands.
     # TrueNAS's Compose support runs images, it doesn't build Dockerfiles.
     image: ghcr.io/xchrizl/ytm-desktop-webapp:latest
+    pull_policy: always
     ports:
       - "${SERVER_PORT:-8080}:${SERVER_PORT:-8080}"
     env_file:

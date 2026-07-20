@@ -53,3 +53,22 @@ Then, on the deploying host:
 ```bash
 docker compose up -d
 ```
+
+### `docker-compose.truenas.yml`
+
+An alternative, self-contained compose file for hosts like TrueNAS where
+pasting a file into a GUI compose editor is easier than also managing a
+separate `.env` file. All config lives inline under `environment:` instead of
+via `env_file`, so it's a single file to copy/paste.
+
+It also skips publishing a host port and instead joins an existing external
+`traefik-net` network, so the app is reachable from a Traefik reverse proxy
+container by its service name (`ytm-desktop-webapp:8080`) without exposing
+the port on the host. This assumes `traefik-net` already exists (created by
+Traefik's own compose stack) — adjust or remove the `networks:` section if
+you don't use Traefik. It doesn't add Traefik routing labels
+(`traefik.enable`, router rules, etc.) — wire those up separately depending
+on how your Traefik instance discovers routes.
+
+Before using it, edit the `REMOTE_IP` value to match the machine running YTM
+Desktop.
