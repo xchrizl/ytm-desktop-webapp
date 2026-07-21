@@ -9,6 +9,7 @@
     const art = el("art");
     const artPlaceholder = el("art-placeholder");
     const adBadge = el("ad-badge");
+    const typeBadge = el("type-badge");
     const titleEl = el("title");
     const authorEl = el("author");
     const albumEl = el("album");
@@ -46,6 +47,9 @@
     const LIKE_DISLIKE = 0, LIKE = 2;
     // Track state: -1 Unknown, 0 Paused, 1 Playing, 2 Buffering.
     const TRACK_PLAYING = 1;
+    // Video type: -1 Unknown, 0 Audio, 1 Video, 2 Uploaded, 3 Podcast. Audio is
+    // the ordinary music case, so it gets no badge; the rest do (see typeBadgeFor).
+    const VIDEO_TYPE_VIDEO = 1, VIDEO_TYPE_UPLOAD = 2, VIDEO_TYPE_PODCAST = 3;
 
     let latestState = null; // last YTMStateRes received, or null
     let latestConnected = false;
@@ -226,10 +230,35 @@
         }
     }
 
+    // A short label for the track's kind, or null for ordinary audio (the
+    // common case) and unknown types. Live takes precedence over videoType --
+    // a live stream is worth flagging regardless of whether it's a "video".
+    // isLive/videoType are only present on companion server >= 2.0.6.
+    function typeBadgeFor(video) {
+        if (video.isLive) return { text: "Live", live: true };
+        switch (video.videoType) {
+            case VIDEO_TYPE_PODCAST: return { text: "Podcast", live: false };
+            case VIDEO_TYPE_UPLOAD: return { text: "Upload", live: false };
+            case VIDEO_TYPE_VIDEO: return { text: "Video", live: false };
+            default: return null;
+        }
+    }
+
+    function setTypeBadge(badge) {
+        if (!badge) {
+            typeBadge.hidden = true;
+            return;
+        }
+        typeBadge.textContent = badge.text;
+        typeBadge.classList.toggle("live", badge.live);
+        typeBadge.hidden = false;
+    }
+
     function renderTrack(state) {
         const video = state ? state.video : null;
 
         if (!video) {
+            setTypeBadge(null);
             titleEl.textContent = "Nothing playing";
             authorEl.textContent = "—";
             albumEl.textContent = "";
@@ -238,6 +267,7 @@
             return;
         }
 
+        setTypeBadge(typeBadgeFor(video));
         titleEl.textContent = video.title || "Unknown title";
         authorEl.textContent = video.author || "Unknown artist";
         albumEl.textContent = video.album || "";

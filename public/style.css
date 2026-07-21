@@ -146,6 +146,28 @@ body {
     min-width: 0;
 }
 
+.type-badge {
+    display: inline-block;
+    margin: 0 auto 6px;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    color: var(--text-dim);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 999px;
+}
+
+/* Live streams get the accent treatment so they stand out from the
+   neutral podcast/upload/video pills. */
+.type-badge.live {
+    background: var(--accent);
+    border-color: transparent;
+    color: var(--accent-contrast);
+}
+
 .meta h1 {
     font-size: 19px;
     font-weight: 600;
