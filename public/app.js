@@ -152,6 +152,7 @@
         ws.addEventListener("open", () => {
             reconnectDelay = 1000;
             updateStatusBar();
+            dispatchPendingShare();
         });
 
         ws.addEventListener("close", () => {
@@ -205,6 +206,86 @@
             return;
         }
         ws.send(JSON.stringify(command));
+    }
+
+    // --- Web Share Target ("share to play") ----------------------------------
+    // When launched via Android's Share sheet from the YouTube Music (or
+    // YouTube) app, the manifest's share_target lands the shared URL on this
+    // page as ?text=/?url=/?title= query params (see manifest.json). We parse
+    // out the videoId/playlistId and fire the same `changeVideo` command the
+    // playlists panel uses, so the shared song/playlist starts playing on the
+    // paired desktop. A normal launch has no share params, so this is a no-op.
+
+    // { videoId, playlistId } waiting to be sent once the WS is open, or null.
+    let pendingShare = null;
+
+    /**
+     * Extracts { videoId, playlistId } from a string that contains a YouTube
+     * Music / YouTube URL (Android sometimes prefixes the URL with other text).
+     * Returns null if no usable id is found.
+     */
+    function parseYtmShare(str) {
+        if (!str) return null;
+        const match = str.match(/https?:\/\/\S+/);
+        if (!match) return null;
+
+        let url;
+        try {
+            url = new URL(match[0]);
+        } catch {
+            return null;
+        }
+
+        const host = url.hostname.replace(/^www\./, "");
+        const params = url.searchParams;
+        let videoId = null;
+        let playlistId = null;
+
+        if (host === "youtu.be") {
+            videoId = url.pathname.slice(1).split("/")[0] || null;
+        } else if (host === "music.youtube.com" || host === "youtube.com" || host === "m.youtube.com") {
+            if (url.pathname.startsWith("/playlist")) {
+                playlistId = params.get("list");
+            } else {
+                // /watch (and share variants) carry v= and, for a song shared
+                // from within a playlist/radio, an accompanying list= context.
+                videoId = params.get("v");
+                playlistId = params.get("list");
+            }
+        }
+
+        if (!videoId && !playlistId) return null;
+        return { videoId: videoId || null, playlistId: playlistId || null };
+    }
+
+    // Reads any share params off the launch URL, records the parsed target as
+    // pendingShare, then strips the query so a manual reload doesn't replay it.
+    function consumeShareFromUrl() {
+        const params = new URLSearchParams(location.search);
+        if (!params.has("text") && !params.has("url") && !params.has("title")) return;
+
+        const share =
+            parseYtmShare(params.get("url")) ||
+            parseYtmShare(params.get("text")) ||
+            parseYtmShare(params.get("title"));
+
+        history.replaceState({}, "", location.pathname);
+
+        if (!share) {
+            showToast("Couldn't find a YouTube Music link to play");
+            return;
+        }
+        pendingShare = share;
+    }
+
+    // Sends the queued share once the WS is open. Fires from the ws "open"
+    // handler (and directly, if a share is consumed while already connected).
+    function dispatchPendingShare() {
+        if (!pendingShare) return;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        sendCommand({ command: "changeVideo", data: pendingShare });
+        pendingShare = null;
+        showToast("Playing shared link…");
     }
 
     // --- Rendering ---------------------------------------------------------
@@ -796,8 +877,10 @@
     // notification) for a page playing media over 5 seconds long, to avoid
     // triggering it for incidental UI sounds -- see
     // https://developer.chrome.com/blog/media-notifications. `silence` is a
-    // 10s near-silent (not zero-amplitude) WAV looped for as long as a track
-    // is loaded, purely to keep the browser's media notification alive;
+    // 10s all-zero-PCM (true digital silence) WAV looped for as long as a
+    // track is loaded, purely to keep the browser's media notification alive.
+    // Chrome grants audio focus on play() without inspecting the samples, so
+    // silence holds focus while producing no sound;
     // ms.playbackState still reflects the real (paused/playing) state shown
     // in the notification.
     let silenceUnlocked = false;
@@ -910,5 +993,8 @@
 
     updateStatusBar();
     render(null);
+    consumeShareFromUrl();
     connectWs();
+    // In case the socket opened synchronously above, don't wait on the handler.
+    dispatchPendingShare();
 })();
