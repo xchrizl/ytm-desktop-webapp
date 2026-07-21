@@ -40,7 +40,7 @@ Startup is orchestrated in `src/index.ts`: resolve the companion API base URL �
 
 ### Frontend (`public/`)
 
-Vanilla JS, no framework or build. `app.js` opens `/ws` (auto-reconnect with backoff), renders player state, and derives displayed progress from a real-time anchor rather than a ticking counter (avoids stutter from server updates fighting a local timer). `sw.js` is a deliberately network-only service worker — it exists only for PWA installability, no caching. Known limitation: the companion API reports no shuffle state, so the shuffle button only flashes as click feedback.
+Vanilla JS, no framework or build. `app.js` opens `/ws` (auto-reconnect with backoff), renders player state, and derives displayed progress from a real-time anchor rather than a ticking counter (avoids stutter from server updates fighting a local timer). `sw.js` is a deliberately network-only service worker — it exists only for PWA installability, no caching. Known limitation: the companion API reports no shuffle state, so the shuffle button tracks its on/off state locally (each click toggles the red `active` style); this can drift if shuffle is changed directly in the desktop app.
 
 ## Testing
 

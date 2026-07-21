@@ -9,10 +9,13 @@
     const art = el("art");
     const artPlaceholder = el("art-placeholder");
     const adBadge = el("ad-badge");
+    const metaEl = el("meta");
     const typeBadge = el("type-badge");
     const titleEl = el("title");
     const authorEl = el("author");
     const albumEl = el("album");
+    const counterpartBtn = el("counterpart-btn");
+    const queueStatus = el("queue-status");
     const seek = el("seek");
     const timeCurrent = el("time-current");
     const timeTotal = el("time-total");
@@ -47,9 +50,11 @@
     const LIKE_DISLIKE = 0, LIKE = 2;
     // Track state: -1 Unknown, 0 Paused, 1 Playing, 2 Buffering.
     const TRACK_PLAYING = 1;
-    // Video type: -1 Unknown, 0 Audio, 1 Video, 2 Uploaded, 3 Podcast. Audio is
-    // the ordinary music case, so it gets no badge; the rest do (see typeBadgeFor).
-    const VIDEO_TYPE_VIDEO = 1, VIDEO_TYPE_UPLOAD = 2, VIDEO_TYPE_PODCAST = 3;
+    // Video type: -1 Unknown, 0 Audio, 1 Video, 2 Uploaded, 3 Podcast. Only the
+    // genuinely-distinct, rare kinds get a badge (see typeBadgeFor) -- ordinary
+    // YTM tracks report Video, so badging that just adds noise to every song.
+    // AUDIO/VIDEO are still used to label the audio<->video toggle button.
+    const VIDEO_TYPE_AUDIO = 0, VIDEO_TYPE_VIDEO = 1, VIDEO_TYPE_UPLOAD = 2, VIDEO_TYPE_PODCAST = 3;
 
     let latestState = null; // last YTMStateRes received, or null
     let latestConnected = false;
@@ -62,9 +67,11 @@
     let volumeBeforeMute = 100;
     let tickTimer = null;
     // Known limitation: the companion API has no field reporting whether
-    // shuffle is on, so the shuffle button can't reflect real state -- it
-    // just flashes briefly as feedback when clicked (see its handler).
-    let shuffleFlashTimer = null;
+    // shuffle is on, so we can't read the real state back. Instead we track it
+    // locally: each click flips this boolean and the button holds the "active"
+    // (red) style to match. This can drift if shuffle is toggled directly in
+    // the desktop app, but it gives the button a visible on/off state.
+    let shuffleActive = false;
 
     // Progress is tracked as an anchor (value + the real-time timestamp it was
     // true as of) rather than a value nudged forward by a timer. The server
@@ -230,16 +237,16 @@
         }
     }
 
-    // A short label for the track's kind, or null for ordinary audio (the
-    // common case) and unknown types. Live takes precedence over videoType --
-    // a live stream is worth flagging regardless of whether it's a "video".
-    // isLive/videoType are only present on companion server >= 2.0.6.
+    // A short label for the track's kind, or null for the common cases (audio,
+    // and the near-ubiquitous "Video" type that ordinary YTM music reports).
+    // Only podcasts, user uploads, and live streams -- which are genuinely
+    // distinct and uncommon -- earn a badge. Live takes precedence. isLive and
+    // videoType are only present on companion server >= 2.0.6.
     function typeBadgeFor(video) {
         if (video.isLive) return { text: "Live", live: true };
         switch (video.videoType) {
             case VIDEO_TYPE_PODCAST: return { text: "Podcast", live: false };
             case VIDEO_TYPE_UPLOAD: return { text: "Upload", live: false };
-            case VIDEO_TYPE_VIDEO: return { text: "Video", live: false };
             default: return null;
         }
     }
@@ -254,11 +261,62 @@
         typeBadge.hidden = false;
     }
 
+    // The queue item flagged `selected` is the one currently playing -- the
+    // source of the current track's `counterparts` (alternate audio/video
+    // versions of the same song). Searches items then automix directly rather
+    // than concatenating them, since this runs on every state tick.
+    function currentQueueItem(state) {
+        const queue = state && state.player ? state.player.queue : null;
+        if (!queue) return null;
+        return (queue.items || []).find((item) => item.selected)
+            || (queue.automixItems || []).find((item) => item.selected)
+            || null;
+    }
+
+    // Shows/hides the audio<->video toggle. A queue item's own `videoId` and
+    // its `counterpart` are the same song's two forms (audio + video). The item
+    // keeps the audio videoId even once you've switched to the video, so we
+    // don't target the counterpart directly -- we target whichever of the two
+    // ids ISN'T currently playing, which works in both directions. The button
+    // only appears when the current track is genuinely one half of such a pair.
+    // The label reflects the current form (from videoType): audio -> "Watch
+    // video", video -> "Play audio only".
+    function setCounterpart(state) {
+        const current = currentQueueItem(state);
+        const counterpart = current && current.counterparts && current.counterparts[0];
+        const currentId = state && state.video ? state.video.id : null;
+
+        const pair = current && counterpart ? [current.videoId, counterpart.videoId] : [];
+        const targetId = currentId && pair.includes(currentId)
+            ? pair.find((id) => id && id !== currentId)
+            : null;
+
+        if (!targetId) {
+            counterpartBtn.hidden = true;
+            counterpartBtn.onclick = null;
+            return;
+        }
+
+        const currentType = state.video ? state.video.videoType : undefined;
+        let label = "Switch version";
+        if (currentType === VIDEO_TYPE_VIDEO) label = "Play audio only";
+        else if (currentType === VIDEO_TYPE_AUDIO) label = "Watch video";
+
+        counterpartBtn.textContent = label;
+        counterpartBtn.hidden = false;
+        counterpartBtn.onclick = () => {
+            sendCommand({ command: "changeVideo", data: { videoId: targetId, playlistId: null } });
+            showToast(label);
+        };
+    }
+
     function renderTrack(state) {
         const video = state ? state.video : null;
 
         if (!video) {
             setTypeBadge(null);
+            setCounterpart(null);
+            metaEl.classList.remove("metadata-loading");
             titleEl.textContent = "Nothing playing";
             authorEl.textContent = "—";
             albumEl.textContent = "";
@@ -267,7 +325,11 @@
             return;
         }
 
+        // metadataFilled is undefined on older companion servers -- only dim
+        // when it's explicitly false, so behaviour is unchanged without it.
+        metaEl.classList.toggle("metadata-loading", video.metadataFilled === false);
         setTypeBadge(typeBadgeFor(video));
+        setCounterpart(state);
         titleEl.textContent = video.title || "Unknown title";
         authorEl.textContent = video.author || "Unknown artist";
         albumEl.textContent = video.album || "";
@@ -380,15 +442,35 @@
         return li;
     }
 
+    // Endless/radio queue indicator. isGenerating (fetching more tracks) takes
+    // precedence over the steady "Radio" label so the momentary state is
+    // visible; neither shows for an ordinary finite queue.
+    function setQueueStatus(queue) {
+        let text = null;
+        if (queue.isGenerating) text = "Adding songs…";
+        else if (queue.isInfinite) text = "Radio";
+
+        if (!text) {
+            queueStatus.hidden = true;
+            return;
+        }
+        queueStatus.textContent = text;
+        queueStatus.hidden = false;
+    }
+
     function renderQueue(queue) {
         if (!queue || !queue.items || queue.items.length === 0) {
             queuePanel.hidden = true;
             queueList.textContent = "";
+            queueStatus.hidden = true;
             renderedQueueSignature = null;
             return;
         }
 
         queuePanel.hidden = false;
+        // Runs every tick (isGenerating flips without the track list changing),
+        // so it must be outside the signature short-circuit below.
+        setQueueStatus(queue);
 
         const automix = queue.automixItems || [];
         const signature = queueSignature(queue);
@@ -453,9 +535,8 @@
 
     btnShuffle.addEventListener("click", () => {
         sendCommand({ command: "shuffle" });
-        btnShuffle.classList.add("active");
-        clearTimeout(shuffleFlashTimer);
-        shuffleFlashTimer = setTimeout(() => btnShuffle.classList.remove("active"), 1000);
+        shuffleActive = !shuffleActive;
+        btnShuffle.classList.toggle("active", shuffleActive);
     });
     btnPrev.addEventListener("click", () => sendCommand({ command: "previous" }));
     btnNext.addEventListener("click", () => sendCommand({ command: "next" }));

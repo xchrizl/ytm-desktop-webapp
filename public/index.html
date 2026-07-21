@@ -27,11 +27,12 @@
                 <div id="ad-badge" class="ad-badge" hidden>Advertisement</div>
             </div>
 
-            <div class="meta">
+            <div class="meta" id="meta">
                 <span id="type-badge" class="type-badge" hidden></span>
                 <h1 id="title">Nothing playing</h1>
                 <p id="author">&mdash;</p>
                 <p id="album"></p>
+                <button id="counterpart-btn" class="counterpart-btn" type="button" hidden></button>
             </div>
 
             <div class="progress-row">
@@ -82,7 +83,10 @@
 
         <section class="queue-panel" id="queue-panel" hidden>
             <button id="queue-toggle" class="queue-toggle">
-                <span>Queue</span>
+                <span class="queue-toggle-label">
+                    <span>Queue</span>
+                    <span id="queue-status" class="queue-status" hidden></span>
+                </span>
                 <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
             </button>
             <ul id="queue-list" class="queue-list"></ul>

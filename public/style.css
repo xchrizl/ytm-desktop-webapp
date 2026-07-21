@@ -144,6 +144,15 @@ body {
     text-align: center;
     width: 100%;
     min-width: 0;
+    transition: opacity 0.2s ease;
+}
+
+/* While the companion server reports the track's metadata as not yet
+   filled (video.metadataFilled === false), dim the block so the initial,
+   possibly-incomplete title/album reads as provisional instead of flashing
+   as if it were final. */
+.meta.metadata-loading {
+    opacity: 0.5;
 }
 
 .type-badge {
@@ -166,6 +175,32 @@ body {
     background: var(--accent);
     border-color: transparent;
     color: var(--accent-contrast);
+}
+
+.counterpart-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 8px;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+}
+
+.counterpart-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+/* A `display` set by a class beats the `hidden` attribute's default
+   display:none, so these would otherwise show as empty pills when hidden. */
+.type-badge[hidden],
+.counterpart-btn[hidden] {
+    display: none;
 }
 
 .meta h1 {
@@ -376,6 +411,28 @@ input[type="range"]:disabled {
     font-weight: 600;
     padding: 14px 18px;
     cursor: pointer;
+}
+
+.queue-toggle-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+/* "Radio" / "Adding songs…" state for infinite (endless) queues, driven by
+   queue.isInfinite and queue.isGenerating. */
+.queue-status {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    padding: 2px 7px;
+    border-radius: 999px;
+    white-space: nowrap;
 }
 
 .queue-toggle svg {
