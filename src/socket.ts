@@ -1,10 +1,14 @@
 import { io, type Socket } from "socket.io-client";
 import { getApiBaseUrl } from "./api";
-import type { YTMStateRes } from "./types";
+import type { YTMPlaylist, YTMStateRes } from "./types";
 
 export interface YtmSocketHandlers {
     /** Fired every time the companion server pushes a new player state. */
     onStateUpdate: (state: YTMStateRes) => void;
+    /** Fired when the user creates a playlist in YTM. Payload is the new `{ id, title }`. */
+    onPlaylistCreated?: (playlist: YTMPlaylist) => void;
+    /** Fired when the user deletes a playlist in YTM. Payload is the deleted playlist's id. */
+    onPlaylistDeleted?: (playlistId: string) => void;
     onConnect?: () => void;
     onDisconnect?: (reason: string) => void;
     /**
@@ -70,6 +74,17 @@ export async function connectYtmSocket(token: string, handlers: YtmSocketHandler
 
     socket.on("state-update", (data: YTMStateRes) => {
         handlers.onStateUpdate(data);
+    });
+
+    // The companion server pushes these when the user's playlist library
+    // changes, so clients don't have to re-poll the slow, rate-limited
+    // GET /playlists to notice a create/delete.
+    socket.on("playlist-created", (playlist: YTMPlaylist) => {
+        handlers.onPlaylistCreated?.(playlist);
+    });
+
+    socket.on("playlist-deleted", (playlistId: string) => {
+        handlers.onPlaylistDeleted?.(playlistId);
     });
 
     return {

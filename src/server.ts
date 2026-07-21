@@ -96,6 +96,39 @@ async function handleGetPlaylists(ws: ClientSocket, token: string): Promise<void
     send(ws, { type: "playlists", playlists });
 }
 
+function broadcastPlaylists(playlists: YTMPlaylist[]): void {
+    if (clients.size === 0) return;
+    const payload = JSON.stringify({ type: "playlists", playlists } satisfies OutgoingMessage);
+    for (const ws of clients) {
+        ws.send(payload);
+    }
+}
+
+// The companion server emits playlist-created/deleted over the realtime
+// socket (see index.ts). Rather than invalidate the cache and pay the slow,
+// rate-limited GET /playlists again, apply the change to the cached list in
+// place and push the updated list to every client. The cache's `at` is left
+// untouched so the periodic full re-fetch still acts as a resync safety net.
+// If nothing is cached yet there's no baseline to patch -- the next
+// getPlaylists fetch will pick the change up on its own.
+
+/** Adds a newly-created playlist to the cached list and broadcasts it live. */
+export function addPlaylist(playlist: YTMPlaylist): void {
+    if (!playlistsCache) return;
+    if (playlistsCache.data.some((p) => p.id === playlist.id)) return;
+    playlistsCache.data = [...playlistsCache.data, playlist];
+    broadcastPlaylists(playlistsCache.data);
+}
+
+/** Removes a deleted playlist from the cached list and broadcasts it live. */
+export function removePlaylist(playlistId: string): void {
+    if (!playlistsCache) return;
+    const next = playlistsCache.data.filter((p) => p.id !== playlistId);
+    if (next.length === playlistsCache.data.length) return;
+    playlistsCache.data = next;
+    broadcastPlaylists(playlistsCache.data);
+}
+
 async function handleIncomingMessage(ws: ClientSocket, raw: string): Promise<void> {
     if (!currentToken) {
         send(ws, { type: "error", message: "Not authenticated with the companion server yet" });

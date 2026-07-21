@@ -3,7 +3,7 @@ import { getValidToken, invalidateToken } from "./auth";
 import { getApiBaseUrl } from "./api";
 import { connectYtmSocket, type YtmSocketHandle } from "./socket";
 import { setPlayerState, setConnected } from "./state";
-import { broadcastError, setCurrentToken, startServer } from "./server";
+import { addPlaylist, broadcastError, removePlaylist, setCurrentToken, startServer } from "./server";
 
 async function main(): Promise<void> {
     console.log(`[index] ${config.appName} v${config.appVersion} starting (web UI on port ${config.serverPort})`);
@@ -30,6 +30,14 @@ async function main(): Promise<void> {
     const socketHandle: YtmSocketHandle = await connectYtmSocket(token, {
         onStateUpdate: (state) => {
             setPlayerState(state);
+        },
+        onPlaylistCreated: (playlist) => {
+            console.log("[index] playlist created:", playlist.title);
+            addPlaylist(playlist);
+        },
+        onPlaylistDeleted: (playlistId) => {
+            console.log("[index] playlist deleted:", playlistId);
+            removePlaylist(playlistId);
         },
         onConnect: () => {
             setConnected(true);

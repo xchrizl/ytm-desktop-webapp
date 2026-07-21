@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { config } from "../src/config";
-import { broadcastError, setCurrentToken, startServer } from "../src/server";
+import { addPlaylist, broadcastError, removePlaylist, setCurrentToken, startServer } from "../src/server";
 import { setConnected, setPlayerState } from "../src/state";
 import type { YTMQueue, YTMStateRes } from "../src/types";
 import { mockServer } from "./mock-companion-server";
@@ -173,6 +173,75 @@ describe("websocket protocol", () => {
             ws.close();
 
             expect(msg).toEqual({ type: "error", message: "YTM Desktop went away" });
+        });
+
+        describe("live playlist updates from the realtime socket", () => {
+            // addPlaylist/removePlaylist only patch a populated cache. Prime it
+            // via a getPlaylists round-trip so there's a baseline list to patch.
+            async function primePlaylistsCache(ws: WebSocket): Promise<void> {
+                const reply = nextMessage(ws);
+                ws.send(JSON.stringify({ type: "getPlaylists" }));
+                await reply;
+            }
+
+            test("addPlaylist appends the playlist and broadcasts the new list", async () => {
+                const ws = new WebSocket(`ws://localhost:${config.serverPort}/ws`);
+                await waitOpen(ws);
+                await nextMessage(ws); // drain the initial state push
+                await primePlaylistsCache(ws);
+
+                const push = nextMessage(ws);
+                addPlaylist({ id: "PL_CREATED", title: "Freshly created" });
+                const msg = await push;
+                ws.close();
+
+                expect(msg.type).toBe("playlists");
+                expect(msg.playlists).toContainEqual({ id: "PL_CREATED", title: "Freshly created" });
+            });
+
+            test("addPlaylist ignores a playlist already in the cache (no duplicate broadcast)", async () => {
+                const ws = new WebSocket(`ws://localhost:${config.serverPort}/ws`);
+                await waitOpen(ws);
+                await nextMessage(ws); // drain the initial state push
+                await primePlaylistsCache(ws);
+
+                // First add broadcasts -> drain it.
+                const firstPush = nextMessage(ws);
+                addPlaylist({ id: "PL_DUP", title: "Only once" });
+                await firstPush;
+
+                // A second add of the same id must not broadcast; assert by racing
+                // the (non-)push against a short timeout.
+                let pushed = false;
+                nextMessage(ws).then(() => {
+                    pushed = true;
+                });
+                addPlaylist({ id: "PL_DUP", title: "Only once" });
+                await new Promise((resolve) => setTimeout(resolve, 100));
+                ws.close();
+
+                expect(pushed).toBe(false);
+            });
+
+            test("removePlaylist drops the playlist and broadcasts the new list", async () => {
+                const ws = new WebSocket(`ws://localhost:${config.serverPort}/ws`);
+                await waitOpen(ws);
+                await nextMessage(ws); // drain the initial state push
+                await primePlaylistsCache(ws);
+
+                // Seed the playlist to delete, draining its add broadcast.
+                const addPush = nextMessage(ws);
+                addPlaylist({ id: "PL_TO_DELETE", title: "Doomed" });
+                await addPush;
+
+                const push = nextMessage(ws);
+                removePlaylist("PL_TO_DELETE");
+                const msg = await push;
+                ws.close();
+
+                expect(msg.type).toBe("playlists");
+                expect(msg.playlists).not.toContainEqual({ id: "PL_TO_DELETE", title: "Doomed" });
+            });
         });
     });
 });
