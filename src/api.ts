@@ -1,4 +1,5 @@
 import { config } from "./config";
+import { getRemoteBaseUrl } from "./settings";
 import type {
     YTMMetadataRes,
     YTMCodeReq,
@@ -46,7 +47,7 @@ async function resolveApiBaseUrl(): Promise<string> {
         // being stuck with a permanently-rejected promise for the process lifetime.
         resolvedBaseUrlPromise = (async () => {
             try {
-                const res = await fetch(`${config.remoteBaseUrl}/metadata`, {
+                const res = await fetch(`${getRemoteBaseUrl()}/metadata`, {
                     signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
                 });
                 if (!res.ok) {
@@ -67,7 +68,7 @@ async function resolveApiBaseUrl(): Promise<string> {
                     );
                 }
 
-                return `${config.remoteBaseUrl}/api/${config.apiVersion}`;
+                return `${getRemoteBaseUrl()}/api/${config.apiVersion}`;
             } catch (err) {
                 resolvedBaseUrlPromise = null;
                 throw err;
@@ -77,10 +78,17 @@ async function resolveApiBaseUrl(): Promise<string> {
     return resolvedBaseUrlPromise;
 }
 
-/** Test-only: clears the cached base-URL resolution so the next call re-resolves it from scratch. */
-export function _resetApiBaseUrlCacheForTests(): void {
+/**
+ * Clears the cached base-URL resolution so the next call re-resolves it from
+ * scratch. Called when the companion host changes at runtime (the cached URL
+ * points at the old host), and by tests that need a clean slate.
+ */
+export function resetApiBaseUrlCache(): void {
     resolvedBaseUrlPromise = null;
 }
+
+/** @deprecated Kept as an alias for existing tests; prefer resetApiBaseUrlCache. */
+export const _resetApiBaseUrlCacheForTests = resetApiBaseUrlCache;
 
 /**
  * Returns the version-checked companion API base URL (e.g.

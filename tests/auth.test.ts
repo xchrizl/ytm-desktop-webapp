@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { getValidToken, invalidateToken } from "../src/auth";
+import { getValidToken, invalidateToken, pairToken, readPersistedToken } from "../src/auth";
 import { config } from "../src/config";
 import { mockServer } from "./mock-companion-server";
 
@@ -56,5 +56,23 @@ describe("auth", () => {
     test("invalidateToken is a no-op when there's nothing to delete", async () => {
         await invalidateToken();
         await expect(invalidateToken()).resolves.toBeUndefined();
+    });
+
+    test("readPersistedToken returns null when nothing is stored, the token when it is", async () => {
+        expect(await readPersistedToken()).toBeNull();
+
+        await Bun.write(config.tokenFilePath, "stored-token");
+        expect(await readPersistedToken()).toBe("stored-token");
+    });
+
+    test("pairToken invokes onCode with the issued code and returns the token", async () => {
+        const captured: { code: string | null } = { code: null };
+
+        const token = await pairToken((code) => {
+            captured.code = code;
+        });
+
+        expect(captured.code).toBe("TEST-CODE");
+        expect(token).toBe("valid-token");
     });
 });

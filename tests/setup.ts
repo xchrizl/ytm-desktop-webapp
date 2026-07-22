@@ -11,6 +11,7 @@ const serverPort = portProbe.port;
 portProbe.stop(true);
 
 const tokenFilePath = join(tmpdir(), `ytm-desktop-webapp-test-token-${process.pid}.txt`);
+const settingsFilePath = join(tmpdir(), `ytm-desktop-webapp-test-settings-${process.pid}.json`);
 
 // src/config.ts reads these once at import time, so they must be set before
 // any test file (or the modules it imports) ever touches "../src/config".
@@ -22,12 +23,15 @@ process.env.APP_NAME = "YTM Desktop WebApp Tests";
 process.env.APP_VERSION = "0.0.0-test";
 process.env.SERVER_PORT = String(serverPort);
 process.env.TOKEN_FILE_PATH = tokenFilePath;
+process.env.SETTINGS_FILE_PATH = settingsFilePath;
 
 afterAll(async () => {
     mockServer.stop();
-    try {
-        await unlink(tokenFilePath);
-    } catch {
-        // Nothing to clean up if a test never wrote it.
+    for (const path of [tokenFilePath, settingsFilePath]) {
+        try {
+            await unlink(path);
+        } catch {
+            // Nothing to clean up if a test never wrote it.
+        }
     }
 });

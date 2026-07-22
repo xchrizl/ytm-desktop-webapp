@@ -43,6 +43,10 @@ function looksLikeAuthError(err: Error): boolean {
  * handled via the onConnect/onConnectionError handlers).
  */
 export async function connectYtmSocket(token: string, handlers: YtmSocketHandlers): Promise<YtmSocketHandle> {
+    // The base URL (and thus the target host) is captured here at construction.
+    // `updateToken` reconnects the *same* socket to the *same* host; switching
+    // hosts means disconnecting this handle and calling connectYtmSocket again
+    // for a fresh socket (see connection.ts changeHost).
     const baseUrl = await getApiBaseUrl();
 
     const socket: Socket = io(`${baseUrl}/realtime`, {

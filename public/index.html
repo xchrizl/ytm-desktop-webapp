@@ -13,10 +13,30 @@
     <div id="backdrop"></div>
 
     <div id="app">
-        <header class="status-bar">
-            <span id="conn-dot" class="dot"></span>
-            <span id="conn-text">Connecting&hellip;</span>
+        <header class="top-bar">
+            <span class="status-pill">
+                <span id="conn-dot" class="dot"></span>
+                <span id="conn-text">Connecting&hellip;</span>
+            </span>
+            <button id="settings-btn" class="settings-btn" type="button" title="Settings" aria-label="Settings">
+                <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.05.3-.07.62-.07.94 0 .32.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.13.22.39.31.61.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.09.48 0 .61-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg>
+            </button>
         </header>
+
+        <section class="settings-panel" id="settings-panel" hidden>
+            <div class="settings-section">
+                <span class="settings-label">Companion server</span>
+                <div class="host-row">
+                    <input id="host-ip" class="text-input" type="text" inputmode="url" autocomplete="off"
+                        autocapitalize="off" spellcheck="false" placeholder="192.168.1.10" aria-label="Companion host or IP" />
+                    <input id="host-port" class="text-input port" type="number" min="1" max="65535"
+                        placeholder="9863" aria-label="Companion port" />
+                </div>
+                <p id="pair-status" class="pair-status">&mdash;</p>
+                <div id="pair-code" class="pair-code" hidden></div>
+                <button id="pair-btn" class="btn-primary" type="button">Pair</button>
+            </div>
+        </section>
 
         <main class="player-card" id="player-card">
             <div class="art-wrap">

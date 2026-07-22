@@ -9,13 +9,18 @@
  */
 
 interface Config {
-    /** YTM Desktop companion server host, e.g. "127.0.0.1" */
+    /**
+     * YTM Desktop companion server host, e.g. "127.0.0.1".
+     * NOTE: this (and remotePort/remoteHost/remoteBaseUrl) is only the
+     * *initial default* — the live host can be changed at runtime from the
+     * UI and lives in `settings.ts`, which seeds itself from these values.
+     */
     remoteIp: string;
-    /** YTM Desktop companion server port, e.g. 9863 */
+    /** YTM Desktop companion server port, e.g. 9863 (initial default; see remoteIp) */
     remotePort: number;
-    /** Convenience "ip:port" combo, e.g. "127.0.0.1:9863" */
+    /** Convenience "ip:port" combo, e.g. "127.0.0.1:9863" (initial default; see remoteIp) */
     remoteHost: string;
-    /** Companion server base URL, e.g. "http://127.0.0.1:9863" */
+    /** Companion server base URL, e.g. "http://127.0.0.1:9863" (initial default; see remoteIp) */
     remoteBaseUrl: string;
     /** Requested companion API version, e.g. "v1" */
     apiVersion: string;
@@ -30,6 +35,9 @@ interface Config {
 
     /** Path to the file used to persist the auth token between runs */
     tokenFilePath: string;
+
+    /** Path to the file used to persist runtime settings (the live companion host) between runs */
+    settingsFilePath: string;
 }
 
 /** Reads a required env var, exits the process with a clear error if missing/empty. */
@@ -70,6 +78,7 @@ function loadConfig(): Config {
 
     const serverPort = parsePort("SERVER_PORT", optionalEnv("SERVER_PORT", "8080"));
     const tokenFilePath = optionalEnv("TOKEN_FILE_PATH", "token.txt");
+    const settingsFilePath = optionalEnv("SETTINGS_FILE_PATH", "settings.json");
 
     const remoteHost = `${remoteIp}:${remotePort}`;
     const remoteBaseUrl = `http://${remoteHost}`;
@@ -85,6 +94,7 @@ function loadConfig(): Config {
         appVersion,
         serverPort,
         tokenFilePath,
+        settingsFilePath,
     });
 }
 

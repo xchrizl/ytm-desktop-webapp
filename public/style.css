@@ -50,7 +50,16 @@ body {
     gap: 16px;
 }
 
-.status-bar {
+.top-bar {
+    width: 100%;
+    max-width: 420px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.status-pill {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -59,6 +68,147 @@ body {
     padding: 6px 12px;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.05);
+    min-width: 0;
+}
+
+.status-pill #conn-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Gear button sits at the right of the top bar; the status pill takes the
+   remaining space so the layout stays centered-ish on wide screens. */
+.settings-btn {
+    flex-shrink: 0;
+    margin-left: auto;
+    width: 34px;
+    height: 34px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.settings-btn svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+}
+
+.settings-btn:hover,
+.settings-btn.open {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--text);
+}
+
+.settings-panel {
+    width: 100%;
+    max-width: 420px;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.settings-panel[hidden] {
+    display: none;
+}
+
+.settings-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.settings-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dimmer);
+}
+
+.host-row {
+    display: flex;
+    gap: 8px;
+}
+
+.text-input {
+    flex: 1;
+    min-width: 0;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    color: var(--text);
+    font-size: 14px;
+    padding: 9px 12px;
+    outline: none;
+}
+
+.text-input.port {
+    flex: 0 0 84px;
+}
+
+.text-input:focus {
+    border-color: rgba(255, 255, 255, 0.28);
+}
+
+.btn-primary {
+    background: var(--text);
+    color: #111;
+    border: none;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: #fff;
+}
+
+.btn-primary:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.btn-primary[hidden] {
+    display: none;
+}
+
+.pair-status {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-dim);
+}
+
+/* Prominent pairing code the user confirms against YTM Desktop's prompt. */
+.pair-code {
+    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-align: center;
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 12px;
+}
+
+.pair-code[hidden] {
+    display: none;
 }
 
 .dot {

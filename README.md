@@ -74,5 +74,22 @@ Before using it, edit the `REMOTE_IP` value to match the machine running YTM
 Desktop.
 
 ```
-docker rm -f ytm-webapp-local; docker run -d --name ytm-webapp-local --restart unless-stopped -p 8080:8080 --env-file .env -e TOKEN_FILE_PATH=/data/token.txt -v ytm-webapp-local-data:/data ytm-desktop-webapp:local; Start-Sleep -Seconds 4; docker logs --tail 3 ytm-webapp-local
+docker rm -f ytm-webapp-local; docker run -d --name ytm-webapp-local --restart unless-stopped -p 8080:8080 --env-file .env -e TOKEN_FILE_PATH=/data/token.txt -e SETTINGS_FILE_PATH=/data/settings.json -v ytm-webapp-local-data:/data ytm-desktop-webapp:local; Start-Sleep -Seconds 4; docker logs --tail 3 ytm-webapp-local
 ```
+
+## Pairing & switching hosts from the UI
+
+The app always starts and serves the web UI, even with no token or an
+unreachable companion server — so `REMOTE_IP`/`REMOTE_PORT` are just the
+initial defaults, not a hard requirement to boot.
+
+Open the UI and use the ⚙ settings button (top right) to:
+
+- **Pair**: when unpaired (or after a token goes stale), the panel shows a
+  **Pair** button. Click it, then approve the code it displays in YTM Desktop
+  (it matches the prompt the desktop app shows). Once approved, it connects.
+- **Change host**: enter a different companion IP + port and click **Connect**.
+  The new host is persisted (to `SETTINGS_FILE_PATH`, overriding the env
+  defaults), the old token is dropped, and you pair against the new host. On a
+  bad/unreachable host the UI shows the error and stays up so you can correct
+  it.

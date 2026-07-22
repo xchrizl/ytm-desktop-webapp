@@ -1,9 +1,10 @@
 import { readFileSync } from "node:fs";
 import type { Serve } from "bun";
 import { config } from "./config";
+import { getRemoteHost } from "./settings";
 import { subscribe, getSnapshot, type StateSnapshot } from "./state";
 import { sendCommand, getPlaylists, ApiError } from "./api";
-import type { YTMCommand, YTMPlaylist } from "./types";
+import type { ConnectionStatus, YTMCommand, YTMPlaylist } from "./types";
 
 const STATIC_DIR = "public";
 
@@ -15,6 +16,23 @@ export function setCurrentToken(token: string): void {
     currentToken = token;
 }
 
+// Handlers for the browser-driven control messages (pairing / host change),
+// registered by index.ts. Kept as an injected seam so the connection state
+// machine (connection.ts) doesn't have to be imported here.
+interface ControlHandlers {
+    startPairing: () => void;
+    setHost: (remoteIp: string, remotePort: number) => void;
+}
+let controlHandlers: ControlHandlers | null = null;
+
+export function setControlHandlers(handlers: ControlHandlers): void {
+    controlHandlers = handlers;
+}
+
+// Latest connection/auth status, so a newly-connected browser can be told
+// where pairing/the socket stand without waiting for the next change.
+let currentStatus: ConnectionStatus | null = null;
+
 type ClientSocket = Bun.ServerWebSocket<unknown>;
 
 const clients = new Set<ClientSocket>();
@@ -22,6 +40,7 @@ const clients = new Set<ClientSocket>();
 type OutgoingMessage =
     | ({ type: "state"; remoteHost: string; queueOmitted?: true } & StateSnapshot)
     | { type: "playlists"; playlists: YTMPlaylist[] }
+    | ({ type: "status" } & ConnectionStatus)
     | { type: "error"; message: string };
 
 function send(ws: ClientSocket, message: OutgoingMessage): void {
@@ -46,7 +65,7 @@ function broadcastState(snapshot: StateSnapshot): void {
         queueUnchanged && snapshot.playerState
             ? {
                   type: "state",
-                  remoteHost: config.remoteHost,
+                  remoteHost: getRemoteHost(),
                   queueOmitted: true,
                   connected: snapshot.connected,
                   playerState: {
@@ -54,7 +73,7 @@ function broadcastState(snapshot: StateSnapshot): void {
                       player: { ...snapshot.playerState.player, queue: null },
                   },
               }
-            : { type: "state", remoteHost: config.remoteHost, ...snapshot };
+            : { type: "state", remoteHost: getRemoteHost(), ...snapshot };
 
     const payload = JSON.stringify(message);
     for (const ws of clients) {
@@ -71,6 +90,16 @@ export function broadcastError(message: string): void {
     }
 }
 
+/** Records the latest connection/auth status and pushes it to every connected browser. */
+export function broadcastStatus(status: ConnectionStatus): void {
+    currentStatus = status;
+    if (clients.size === 0) return;
+    const payload = JSON.stringify({ type: "status", ...status } satisfies OutgoingMessage);
+    for (const ws of clients) {
+        ws.send(payload);
+    }
+}
+
 /** Loose runtime check: is this a plausible YTMCommand? Full validity (e.g. data ranges) is left to the companion server to reject. */
 function isPlausibleCommand(value: unknown): value is YTMCommand {
     return typeof value === "object" && value !== null && typeof (value as { command?: unknown }).command === "string";
@@ -78,6 +107,21 @@ function isPlausibleCommand(value: unknown): value is YTMCommand {
 
 function isPlaylistsRequest(value: unknown): boolean {
     return typeof value === "object" && value !== null && (value as { type?: unknown }).type === "getPlaylists";
+}
+
+function messageType(value: unknown): string | null {
+    if (typeof value !== "object" || value === null) return null;
+    const type = (value as { type?: unknown }).type;
+    return typeof type === "string" ? type : null;
+}
+
+/** Extracts { ip, port } from a `setHost` control message, or null if malformed. */
+function parseSetHost(value: unknown): { ip: string; port: number } | null {
+    const v = value as { ip?: unknown; port?: unknown };
+    const ip = typeof v.ip === "string" ? v.ip.trim() : "";
+    const port = Number(v.port);
+    if (!ip || !Number.isFinite(port)) return null;
+    return { ip, port };
 }
 
 // Playlists change rarely, but the companion endpoint can block for up to
@@ -130,16 +174,35 @@ export function removePlaylist(playlistId: string): void {
 }
 
 async function handleIncomingMessage(ws: ClientSocket, raw: string): Promise<void> {
-    if (!currentToken) {
-        send(ws, { type: "error", message: "Not authenticated with the companion server yet" });
-        return;
-    }
-
     let parsed: unknown;
     try {
         parsed = JSON.parse(raw);
     } catch {
         send(ws, { type: "error", message: "Invalid JSON" });
+        return;
+    }
+
+    // Control messages (pairing / host change) must work while unauthenticated
+    // -- that's the whole point of driving auth from the UI -- so they're
+    // handled before the token guard below.
+    const type = messageType(parsed);
+    if (type === "startPairing") {
+        controlHandlers?.startPairing();
+        return;
+    }
+    if (type === "setHost") {
+        const host = parseSetHost(parsed);
+        if (!host) {
+            send(ws, { type: "error", message: "Invalid host/port" });
+            return;
+        }
+        controlHandlers?.setHost(host.ip, host.port);
+        return;
+    }
+
+    // Everything past here talks to the companion server and needs a token.
+    if (!currentToken) {
+        send(ws, { type: "error", message: "Not authenticated with the companion server yet" });
         return;
     }
 
@@ -233,7 +296,8 @@ export function startServer() {
         websocket: {
             open(ws) {
                 clients.add(ws);
-                send(ws, { type: "state", remoteHost: config.remoteHost, ...getSnapshot() });
+                if (currentStatus) send(ws, { type: "status", ...currentStatus });
+                send(ws, { type: "state", remoteHost: getRemoteHost(), ...getSnapshot() });
             },
             close(ws) {
                 clients.delete(ws);

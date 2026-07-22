@@ -43,6 +43,13 @@
     const toast = el("toast");
     const silence = el("silence");
     const debugPanel = el("debug-panel");
+    const settingsBtn = el("settings-btn");
+    const settingsPanel = el("settings-panel");
+    const hostIp = el("host-ip");
+    const hostPort = el("host-port");
+    const pairStatus = el("pair-status");
+    const pairCode = el("pair-code");
+    const pairBtn = el("pair-btn");
 
     // Repeat mode as reported by the companion server: -1 Unknown, 0 None, 1 All, 2 One.
     const REPEAT_NONE = 0, REPEAT_ALL = 1, REPEAT_ONE = 2;
@@ -58,6 +65,7 @@
 
     let latestState = null; // last YTMStateRes received, or null
     let latestConnected = false;
+    let authStatus = null; // last ConnectionStatus from the server, or null
     let cachedQueue = null; // last full queue received; reused when the server omits an unchanged one
     let remoteHost = null; // companion server "ip:port", from state messages
     let playlistsLoading = false;
@@ -130,19 +138,52 @@
         dot.classList.add(status);
     }
 
+    function connectedText() {
+        return remoteHost ? `Connected · ${remoteHost}` : "Connected";
+    }
+
     function updateStatusBar() {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
             setConnDot("offline");
             connText.textContent = "Reconnecting to server…";
             return;
         }
-        if (!latestConnected) {
-            setConnDot("waiting");
-            connText.textContent = "Waiting for YTM Desktop…";
-            return;
+        // Once the server has reported an auth/connection status, it drives the
+        // bar. Before the first status arrives, fall back to the connected flag
+        // from state messages.
+        switch (authStatus && authStatus.state) {
+            case "connected":
+                setConnDot("connected");
+                connText.textContent = connectedText();
+                return;
+            case "connecting":
+                setConnDot("waiting");
+                connText.textContent = "Connecting to YTM Desktop…";
+                return;
+            case "pairing":
+                setConnDot("waiting");
+                connText.textContent = authStatus.code ? `Pairing — code ${authStatus.code}` : "Pairing…";
+                return;
+            case "unpaired":
+                setConnDot("offline");
+                connText.textContent = "Not paired";
+                return;
+            case "auth-error":
+                setConnDot("offline");
+                connText.textContent = "Re-authentication needed";
+                return;
+            case "disconnected":
+                setConnDot("waiting");
+                connText.textContent = "YTM Desktop unreachable";
+                return;
+            case "error":
+                setConnDot("offline");
+                connText.textContent = authStatus.message || "Connection error";
+                return;
+            default:
+                setConnDot(latestConnected ? "connected" : "waiting");
+                connText.textContent = latestConnected ? connectedText() : "Waiting for YTM Desktop…";
         }
-        setConnDot("connected");
-        connText.textContent = remoteHost ? `Connected · ${remoteHost}` : "Connected";
     }
 
     function connectWs() {
@@ -188,6 +229,11 @@
                 latestState = state;
                 updateStatusBar();
                 render(latestState);
+            } else if (msg.type === "status") {
+                authStatus = msg;
+                if (msg.remoteHost) remoteHost = msg.remoteHost;
+                updateStatusBar();
+                renderSettings();
             } else if (msg.type === "playlists") {
                 renderPlaylists(msg.playlists);
             } else if (msg.type === "error") {
@@ -738,6 +784,119 @@
         // Re-request on every open for freshness; the server caches, so this
         // doesn't hammer the (slow, rate-limited) companion endpoint.
         if (open) requestPlaylists();
+    });
+
+    // --- Settings / pairing --------------------------------------------------
+    // Driven by the server's `status` message (see updateStatusBar). Lets the
+    // user change the companion host and run/redo pairing without editing .env.
+
+    // Splits the live "ip:port" into the two inputs. Only called when the panel
+    // opens, so incoming status updates never clobber what the user is typing.
+    function fillHostInputs() {
+        if (!remoteHost) return;
+        const idx = remoteHost.lastIndexOf(":");
+        if (idx === -1) {
+            hostIp.value = remoteHost;
+            return;
+        }
+        hostIp.value = remoteHost.slice(0, idx);
+        hostPort.value = remoteHost.slice(idx + 1);
+    }
+
+    // True when the host typed in the inputs differs from the live host. The
+    // single action button uses this to decide whether clicking it should
+    // switch host first (label "Pair") or just (re-)pair the current one.
+    function hostEdited() {
+        const typed = `${hostIp.value.trim()}:${(hostPort.value || "").trim()}`;
+        return !!remoteHost && typed !== remoteHost;
+    }
+
+    // Renders the pairing status line + code, and the single action button's
+    // label/disabled state. One button covers every case:
+    //   pairing in progress         -> "Pairing…" (disabled)
+    //   host edited                 -> "Pair"  (switch host, then pair)
+    //   not paired (unpaired/error) -> "Pair"
+    //   paired, host unchanged      -> "Re-pair"
+    function renderSettings() {
+        const st = authStatus && authStatus.state;
+        let text = "—";
+        let showCode = false;
+
+        switch (st) {
+            case "connected":
+                text = "Paired and connected.";
+                break;
+            case "connecting":
+                text = "Connecting…";
+                break;
+            case "pairing":
+                text = authStatus.code ? "Approve this code in YTM Desktop:" : "Requesting a pairing code…";
+                showCode = !!authStatus.code;
+                break;
+            case "unpaired":
+                text = authStatus.message || "Not paired yet.";
+                break;
+            case "auth-error":
+                text = authStatus.message || "Session expired — pair again to reconnect.";
+                break;
+            case "disconnected":
+                text = authStatus.message || "Companion server unreachable — retrying…";
+                break;
+            case "error":
+                text = authStatus.message || "Something went wrong.";
+                break;
+        }
+
+        pairStatus.textContent = text;
+        pairCode.textContent = showCode ? authStatus.code : "";
+        pairCode.hidden = !showCode;
+
+        const pairing = st === "pairing";
+        // "Re-pair" only when we're already on this host with a token; every
+        // other case (no token, or a host change) is a plain "Pair".
+        const paired = st === "connected" || st === "connecting" || st === "disconnected";
+        pairBtn.disabled = pairing;
+        pairBtn.textContent = pairing ? "Pairing…" : !hostEdited() && paired ? "Re-pair" : "Pair";
+    }
+
+    settingsBtn.addEventListener("click", () => {
+        settingsPanel.hidden = !settingsPanel.hidden;
+        settingsBtn.classList.toggle("open", !settingsPanel.hidden);
+        if (!settingsPanel.hidden) {
+            fillHostInputs();
+            renderSettings();
+        }
+    });
+
+    // Re-evaluate the button label as the user edits the host (typing a new
+    // host flips "Re-pair" -> "Pair").
+    hostIp.addEventListener("input", renderSettings);
+    hostPort.addEventListener("input", renderSettings);
+
+    pairBtn.addEventListener("click", () => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            showToast("Not connected to server");
+            return;
+        }
+        if (!hostEdited()) {
+            // Same host: pair / re-pair in place.
+            ws.send(JSON.stringify({ type: "startPairing" }));
+            return;
+        }
+        // Host changed: validate, then switch + pair (the server continues
+        // straight into pairing after the host change).
+        const ip = hostIp.value.trim();
+        const port = Number(hostPort.value);
+        if (!ip) {
+            showToast("Enter a host or IP");
+            return;
+        }
+        if (!Number.isInteger(port) || port < 1 || port > 65535) {
+            showToast("Enter a valid port (1–65535)");
+            return;
+        }
+        ws.send(JSON.stringify({ type: "setHost", ip, port }));
+        showToast(`Switching to ${ip}:${port}…`);
     });
 
     // --- Swipe gestures ------------------------------------------------------

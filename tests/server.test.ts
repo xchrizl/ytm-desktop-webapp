@@ -1,6 +1,15 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { config } from "../src/config";
-import { addPlaylist, broadcastError, removePlaylist, setCurrentToken, startServer } from "../src/server";
+import {
+    addPlaylist,
+    broadcastError,
+    broadcastStatus,
+    removePlaylist,
+    setControlHandlers,
+    setCurrentToken,
+    startServer,
+} from "../src/server";
+import { getRemoteHost } from "../src/settings";
 import { setConnected, setPlayerState } from "../src/state";
 import type { YTMQueue, YTMStateRes } from "../src/types";
 import { mockServer } from "./mock-companion-server";
@@ -102,6 +111,53 @@ describe("websocket protocol", () => {
         ws.close();
 
         expect(msg).toEqual({ type: "error", message: "Not authenticated with the companion server yet" });
+    });
+
+    // Pairing / host-change control messages must be handled before the token
+    // guard -- they're how an unpaired client gets authenticated in the first
+    // place. These run while currentToken is still unset (see the note above).
+    describe("control messages (unauthenticated)", () => {
+        test("dispatches startPairing and setHost to the registered handlers", async () => {
+            let pairingCalls = 0;
+            const host: { last: { ip: string; port: number } | null } = { last: null };
+            setControlHandlers({
+                startPairing: () => {
+                    pairingCalls++;
+                },
+                setHost: (ip, port) => {
+                    host.last = { ip, port };
+                },
+            });
+
+            const ws = new WebSocket(`ws://localhost:${config.serverPort}/ws`);
+            await waitOpen(ws);
+            await nextMessage(ws); // drain the initial state push
+
+            ws.send(JSON.stringify({ type: "startPairing" }));
+            ws.send(JSON.stringify({ type: "setHost", ip: "1.2.3.4", port: 5555 }));
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            ws.close();
+
+            expect(pairingCalls).toBe(1);
+            expect(host.last).toEqual({ ip: "1.2.3.4", port: 5555 });
+        });
+
+        test("rejects a malformed setHost with an error instead of dispatching", async () => {
+            let setHostCalls = 0;
+            setControlHandlers({ startPairing: () => {}, setHost: () => setHostCalls++ });
+
+            const ws = new WebSocket(`ws://localhost:${config.serverPort}/ws`);
+            await waitOpen(ws);
+            await nextMessage(ws); // drain the initial state push
+
+            const reply = nextMessage(ws);
+            ws.send(JSON.stringify({ type: "setHost", ip: "", port: "nope" }));
+            const msg = await reply;
+            ws.close();
+
+            expect(msg).toEqual({ type: "error", message: "Invalid host/port" });
+            expect(setHostCalls).toBe(0);
+        });
     });
 
     describe("once authenticated", () => {
@@ -316,5 +372,34 @@ describe("queue broadcast diffing", () => {
 
         expect(first.queueOmitted).toBeUndefined();
         expect(first.playerState.player.queue).toEqual(queue);
+    });
+});
+
+// Placed last: broadcastStatus sets a module-level currentStatus that then
+// gets sent on every future connect, which would shift the message ordering
+// the earlier tests' drains rely on.
+describe("connection status", () => {
+    test("broadcastStatus pushes a status message to connected clients", async () => {
+        const ws = new WebSocket(`ws://localhost:${config.serverPort}/ws`);
+        await waitOpen(ws);
+        // Let the connect-time messages land and be ignored before we listen.
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        const reply = nextMessage(ws);
+        broadcastStatus({ state: "pairing", remoteHost: getRemoteHost(), code: "AB12" });
+        const msg = await reply;
+        ws.close();
+
+        expect(msg).toEqual({ type: "status", state: "pairing", remoteHost: getRemoteHost(), code: "AB12" });
+    });
+
+    test("a newly connected client is sent the current status first", async () => {
+        broadcastStatus({ state: "connected", remoteHost: getRemoteHost() });
+
+        const ws = new WebSocket(`ws://localhost:${config.serverPort}/ws`);
+        const first = await nextMessage(ws);
+        ws.close();
+
+        expect(first).toEqual({ type: "status", state: "connected", remoteHost: getRemoteHost() });
     });
 });

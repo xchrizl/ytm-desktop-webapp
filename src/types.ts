@@ -100,6 +100,29 @@ export interface YTMPlaylist {
     title: string;
 }
 
+// --- Connection / auth status (this app -> browser) --------------------------
+// Not part of the companion API: our own view of where the token/socket stand,
+// broadcast to browsers so the UI can drive pairing and host switching.
+
+export type ConnStatusState =
+    | "unpaired" // no token; waiting for the user to start pairing
+    | "pairing" // pairing flow running (a `code` may be present to show)
+    | "connecting" // have a token, socket is connecting
+    | "connected" // socket connected to the companion server
+    | "disconnected" // socket dropped for a non-auth reason (host unreachable, etc.)
+    | "auth-error" // token was rejected; user needs to re-pair
+    | "error"; // pairing or host change failed (see `message`)
+
+export interface ConnectionStatus {
+    state: ConnStatusState;
+    /** Live companion "ip:port" the status refers to. */
+    remoteHost: string;
+    /** Pairing code to confirm in YTM Desktop, present only while `state` is "pairing". */
+    code?: string;
+    /** Human-readable detail for "error"/"disconnected"/"auth-error" states. */
+    message?: string;
+}
+
 // --- /command ----------------------------------------------------------------
 
 export type YTMCommand =

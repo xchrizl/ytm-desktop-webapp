@@ -6,7 +6,7 @@ import { requestCode, requestToken } from "./api";
  * Reads the persisted token from disk, if present.
  * Returns null if the file doesn't exist or is empty.
  */
-async function readTokenFromDisk(): Promise<string | null> {
+export async function readPersistedToken(): Promise<string | null> {
     const file = Bun.file(config.tokenFilePath);
     if (!(await file.exists()) || file.size === 0) {
         return null;
@@ -39,10 +39,14 @@ export async function invalidateToken(): Promise<void> {
  * Runs the full requestcode -> (user approves in YTM Desktop) -> request
  * pairing flow, persists the resulting token, and returns it.
  *
+ * `onCode` is invoked with the pairing code as soon as it's issued, so a
+ * caller can surface it to the UI (the user confirms it matches the prompt
+ * YTM Desktop shows). The console log stays as a fallback for headless runs.
+ *
  * Note: the token exchange step blocks for up to 30s server-side while
  * waiting for the user to approve the pairing prompt in the app.
  */
-async function pairNewToken(): Promise<string> {
+export async function pairToken(onCode?: (code: string) => void): Promise<string> {
     console.log("No valid token found - starting pairing flow...");
 
     const { code } = await requestCode({
@@ -52,6 +56,7 @@ async function pairNewToken(): Promise<string> {
     });
 
     console.log(`Open YTM Desktop and approve this pairing code: ${code}`);
+    onCode?.(code);
 
     const { token } = await requestToken({
         appId: config.appId,
@@ -83,6 +88,6 @@ async function pairNewToken(): Promise<string> {
  * this again, which then re-pairs.
  */
 export async function getValidToken(): Promise<string> {
-    const existing = await readTokenFromDisk();
-    return existing ?? pairNewToken();
+    const existing = await readPersistedToken();
+    return existing ?? pairToken();
 }
