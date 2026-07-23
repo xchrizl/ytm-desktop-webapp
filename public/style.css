@@ -357,9 +357,7 @@ body {
     font-size: 19px;
     font-weight: 600;
     margin: 0 0 4px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
 }
 
 .meta p {
