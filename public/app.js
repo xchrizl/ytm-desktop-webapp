@@ -51,17 +51,25 @@
     const pairCode = el("pair-code");
     const pairBtn = el("pair-btn");
 
-    // Repeat mode as reported by the companion server: -1 Unknown, 0 None, 1 All, 2 One.
-    const REPEAT_NONE = 0, REPEAT_ALL = 1, REPEAT_ONE = 2;
-    // Like status: -1 Unknown, 0 Dislike, 1 Indifferent, 2 Like.
-    const LIKE_DISLIKE = 0, LIKE = 2;
-    // Track state: -1 Unknown, 0 Paused, 1 Playing, 2 Buffering.
-    const TRACK_PLAYING = 1;
-    // Video type: -1 Unknown, 0 Audio, 1 Video, 2 Uploaded, 3 Podcast. Only the
-    // genuinely-distinct, rare kinds get a badge (see typeBadgeFor) -- ordinary
-    // YTM tracks report Video, so badging that just adds noise to every song.
-    // AUDIO/VIDEO are still used to label the audio<->video toggle button.
-    const VIDEO_TYPE_AUDIO = 0, VIDEO_TYPE_VIDEO = 1, VIDEO_TYPE_UPLOAD = 2, VIDEO_TYPE_PODCAST = 3;
+    // Pure, DOM-free helpers + companion-server enum constants live in
+    // pure.js (loaded as a plain <script> before this one, so YtmPure is a
+    // global) and are unit-tested in tests/pure.test.ts.
+    const {
+        REPEAT_NONE, REPEAT_ALL, REPEAT_ONE,
+        LIKE_DISLIKE, LIKE,
+        TRACK_PLAYING,
+        VIDEO_TYPE_AUDIO, VIDEO_TYPE_VIDEO,
+        formatTime,
+        thumbnailFor,
+        parseYtmShare,
+        typeBadgeFor,
+        currentQueueItem,
+        counterpartAction,
+        queueSignature,
+        nextRepeatMode,
+        splitHostPort,
+        computeProgress,
+    } = YtmPure;
 
     let latestState = null; // last YTMStateRes received, or null
     let latestConnected = false;
@@ -92,13 +100,6 @@
     let progressIsPlaying = false;
     let progressDuration = Infinity;
 
-    function formatTime(totalSeconds) {
-        const s = Math.max(0, Math.floor(totalSeconds || 0));
-        const m = Math.floor(s / 60);
-        const r = s % 60;
-        return `${m}:${String(r).padStart(2, "0")}`;
-    }
-
     function showToast(message) {
         toast.textContent = message;
         toast.hidden = false;
@@ -114,18 +115,6 @@
     const DPR = window.devicePixelRatio || 1;
     const ART_MIN_PX = 240 * DPR;
     const QUEUE_THUMB_MIN_PX = 36 * DPR;
-
-    /** Smallest thumbnail still sharp at minWidth; falls back to the largest available if none is big enough. */
-    function thumbnailFor(thumbnails, minWidth) {
-        if (!thumbnails || thumbnails.length === 0) return null;
-        let best = null;
-        let largest = thumbnails[0];
-        for (const t of thumbnails) {
-            if (t.width > largest.width) largest = t;
-            if (t.width >= minWidth && (!best || t.width < best.width)) best = t;
-        }
-        return best || largest;
-    }
 
     // --- WebSocket connection to our own Bun server (see src/server.ts) --------
 
@@ -265,45 +254,6 @@
     // { videoId, playlistId } waiting to be sent once the WS is open, or null.
     let pendingShare = null;
 
-    /**
-     * Extracts { videoId, playlistId } from a string that contains a YouTube
-     * Music / YouTube URL (Android sometimes prefixes the URL with other text).
-     * Returns null if no usable id is found.
-     */
-    function parseYtmShare(str) {
-        if (!str) return null;
-        const match = str.match(/https?:\/\/\S+/);
-        if (!match) return null;
-
-        let url;
-        try {
-            url = new URL(match[0]);
-        } catch {
-            return null;
-        }
-
-        const host = url.hostname.replace(/^www\./, "");
-        const params = url.searchParams;
-        let videoId = null;
-        let playlistId = null;
-
-        if (host === "youtu.be") {
-            videoId = url.pathname.slice(1).split("/")[0] || null;
-        } else if (host === "music.youtube.com" || host === "youtube.com" || host === "m.youtube.com") {
-            if (url.pathname.startsWith("/playlist")) {
-                playlistId = params.get("list");
-            } else {
-                // /watch (and share variants) carry v= and, for a song shared
-                // from within a playlist/radio, an accompanying list= context.
-                videoId = params.get("v");
-                playlistId = params.get("list");
-            }
-        }
-
-        if (!videoId && !playlistId) return null;
-        return { videoId: videoId || null, playlistId: playlistId || null };
-    }
-
     // Reads any share params off the launch URL, records the parsed target as
     // pendingShare, then strips the query so a manual reload doesn't replay it.
     function consumeShareFromUrl() {
@@ -364,20 +314,6 @@
         }
     }
 
-    // A short label for the track's kind, or null for the common cases (audio,
-    // and the near-ubiquitous "Video" type that ordinary YTM music reports).
-    // Only podcasts, user uploads, and live streams -- which are genuinely
-    // distinct and uncommon -- earn a badge. Live takes precedence. isLive and
-    // videoType are only present on companion server >= 2.0.6.
-    function typeBadgeFor(video) {
-        if (video.isLive) return { text: "Live", live: true };
-        switch (video.videoType) {
-            case VIDEO_TYPE_PODCAST: return { text: "Podcast", live: false };
-            case VIDEO_TYPE_UPLOAD: return { text: "Upload", live: false };
-            default: return null;
-        }
-    }
-
     function setTypeBadge(badge) {
         if (!badge) {
             typeBadge.hidden = true;
@@ -388,47 +324,18 @@
         typeBadge.hidden = false;
     }
 
-    // The queue item flagged `selected` is the one currently playing -- the
-    // source of the current track's `counterparts` (alternate audio/video
-    // versions of the same song). Searches items then automix directly rather
-    // than concatenating them, since this runs on every state tick.
-    function currentQueueItem(state) {
-        const queue = state && state.player ? state.player.queue : null;
-        if (!queue) return null;
-        return (queue.items || []).find((item) => item.selected)
-            || (queue.automixItems || []).find((item) => item.selected)
-            || null;
-    }
-
-    // Shows/hides the audio<->video toggle. A queue item's own `videoId` and
-    // its `counterpart` are the same song's two forms (audio + video). The item
-    // keeps the audio videoId even once you've switched to the video, so we
-    // don't target the counterpart directly -- we target whichever of the two
-    // ids ISN'T currently playing, which works in both directions. The button
-    // only appears when the current track is genuinely one half of such a pair.
-    // The label reflects the current form (from videoType): audio -> "Watch
-    // video", video -> "Play audio only".
+    // Shows/hides the audio<->video toggle from counterpartAction's decision
+    // (see pure.js). The button only appears when the current track is
+    // genuinely one half of an audio/video pair.
     function setCounterpart(state) {
-        const current = currentQueueItem(state);
-        const counterpart = current && current.counterparts && current.counterparts[0];
-        const currentId = state && state.video ? state.video.id : null;
-
-        const pair = current && counterpart ? [current.videoId, counterpart.videoId] : [];
-        const targetId = currentId && pair.includes(currentId)
-            ? pair.find((id) => id && id !== currentId)
-            : null;
-
-        if (!targetId) {
+        const action = counterpartAction(state);
+        if (!action) {
             counterpartBtn.hidden = true;
             counterpartBtn.onclick = null;
             return;
         }
 
-        const currentType = state.video ? state.video.videoType : undefined;
-        let label = "Switch version";
-        if (currentType === VIDEO_TYPE_VIDEO) label = "Play audio only";
-        else if (currentType === VIDEO_TYPE_AUDIO) label = "Watch video";
-
+        const { targetId, label } = action;
         counterpartBtn.textContent = label;
         counterpartBtn.hidden = false;
         counterpartBtn.onclick = () => {
@@ -531,11 +438,6 @@
     // almost always the list hasn't changed -- only the selection has.
     let renderedQueueSignature = null;
 
-    function queueSignature(queue) {
-        const ids = (list) => (list || []).map((item) => `${item.videoId} ${item.title}`).join("\n");
-        return `${ids(queue.items)}\n--automix--\n${ids(queue.automixItems)}`;
-    }
-
     /** Builds one queue row; `index` is the position in the combined items+automix queue, which is what playQueueIndex expects. */
     function queueRow(item, index) {
         const li = document.createElement("li");
@@ -635,9 +537,12 @@
     // renderPlayer, rather than mutating a stored value tick by tick.
 
     function currentProgress() {
-        if (!progressIsPlaying) return progressAnchorValue;
-        const elapsedSeconds = (performance.now() - progressAnchorAt) / 1000;
-        return Math.min(progressAnchorValue + elapsedSeconds, progressDuration);
+        return computeProgress({
+            value: progressAnchorValue,
+            at: progressAnchorAt,
+            isPlaying: progressIsPlaying,
+            duration: progressDuration,
+        }, performance.now());
     }
 
     function renderProgress() {
@@ -673,8 +578,7 @@
 
     btnRepeat.addEventListener("click", () => {
         const current = latestState?.player.queue?.repeatMode ?? REPEAT_NONE;
-        const next = current === REPEAT_NONE ? REPEAT_ALL : current === REPEAT_ALL ? REPEAT_ONE : REPEAT_NONE;
-        sendCommand({ command: "repeatMode", data: next });
+        sendCommand({ command: "repeatMode", data: nextRepeatMode(current) });
     });
 
     btnMute.addEventListener("click", () => {
@@ -793,14 +697,10 @@
     // Splits the live "ip:port" into the two inputs. Only called when the panel
     // opens, so incoming status updates never clobber what the user is typing.
     function fillHostInputs() {
-        if (!remoteHost) return;
-        const idx = remoteHost.lastIndexOf(":");
-        if (idx === -1) {
-            hostIp.value = remoteHost;
-            return;
-        }
-        hostIp.value = remoteHost.slice(0, idx);
-        hostPort.value = remoteHost.slice(idx + 1);
+        const parts = splitHostPort(remoteHost);
+        if (!parts) return;
+        hostIp.value = parts.ip;
+        if (parts.port) hostPort.value = parts.port;
     }
 
     // True when the host typed in the inputs differs from the live host. The
